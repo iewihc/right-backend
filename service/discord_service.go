@@ -1788,7 +1788,7 @@ func (s *DiscordService) GetEventChineseName(eventType string) string {
 	case "order_failed":
 		return "訂單失敗"
 	case "order_cancelled":
-		return "訂單取消"
+		return "單號取消成功"
 	default:
 		return eventType
 	}

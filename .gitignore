@@ -33,9 +33,24 @@ config.yml
 coverage.out
 
 # Others
-node_modules/ 
+node_modules/
 download-pickup-certificate/
 /sample/
 /uploads/uploads/
-/uploads/
 /init-db/
+
+# Uploads - ignore all files but keep directory structure
+/uploads/*
+!/uploads/.gitkeep
+!/uploads/avatars/
+!/uploads/images/
+!/uploads/audio/
+!/uploads/certificate/
+/uploads/avatars/*
+!/uploads/avatars/.gitkeep
+/uploads/images/*
+!/uploads/images/.gitkeep
+/uploads/audio/*
+!/uploads/audio/.gitkeep
+/uploads/certificate/*
+!/uploads/certificate/.gitkeep

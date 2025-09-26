@@ -380,7 +380,7 @@ func main() {
 		// 創建 OrderSummaryService
 		orderSummaryService := service.NewOrderSummaryService(log.Logger, services.MongoDB)
 		orderSummaryController := controller.NewOrderSummaryController(log.Logger, orderSummaryService, userAuthMiddleware)
-		driverController := controller.NewDriverController(log.Logger, driverService, orderService, orderScheduleService, driverAuthMiddleware, fileStorageService, infra.AppConfig.CertBaseURL)
+		driverController := controller.NewDriverController(log.Logger, driverService, orderService, orderScheduleService, driverAuthMiddleware, fileStorageService, baseURL)
 		userController := controller.NewUserController(log.Logger, userService, orderService, userAuthMiddleware)
 		authController := controller.NewAuthController(log.Logger, userService, driverService)
 		crawlerController := controller.NewCrawlerController(log.Logger, crawlerService)

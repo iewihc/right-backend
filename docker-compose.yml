@@ -80,6 +80,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
     volumes:
       - ./config.yml:/config.yml:ro
+      - uploads-data:/uploads
     networks:
       - right-network
       - right-backend-observability
@@ -105,6 +106,8 @@ volumes:
   redis-data:
     driver: local
   rabbitmq-data:
+    driver: local
+  uploads-data:
     driver: local
 
 networks:

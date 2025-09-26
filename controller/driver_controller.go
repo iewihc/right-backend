@@ -12,7 +12,6 @@ import (
 	"right-backend/middleware"
 	"right-backend/model"
 	"right-backend/service"
-	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -1358,8 +1357,8 @@ func (c *DriverController) handleUploadAvatar(ctx context.Context, req *UploadAv
 		}, nil
 	}
 
-	// 將相對路徑轉換為完整URL用於回應
-	fullURL := fmt.Sprintf("%s/%s", strings.TrimSuffix(c.baseURL, "/"), strings.TrimPrefix(result.RelativePath, "/"))
+	// 使用 DriverService 的 GetDriverAvatarURL 方法生成正確的完整URL
+	fullURL := c.driverService.GetDriverAvatarURL(&result.RelativePath, c.baseURL)
 
 	c.logger.Info().
 		Str("driver_id", driverFromToken.ID.Hex()).

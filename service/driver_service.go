@@ -1905,7 +1905,28 @@ func (s *DriverService) GetDriverAvatarURL(relativePath *string, baseURL string)
 	if relativePath == nil || *relativePath == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/%s", strings.TrimSuffix(baseURL, "/"), strings.TrimPrefix(*relativePath, "/"))
+
+	baseURLClean := strings.TrimSuffix(baseURL, "/")
+	cleanRelativePath := strings.TrimPrefix(*relativePath, "/")
+
+	// 確保 URL 路徑包含 uploads/avatars/ 前綴
+	// 資料庫中存的路徑格式: avatars/ABC-5808/filename.webp
+	// baseURL 格式: https://right.mr-chi-tech.com/uploads
+	// 最終 URL: https://right.mr-chi-tech.com/uploads/avatars/ABC-5808/filename.webp
+	if !strings.HasPrefix(cleanRelativePath, "avatars/") {
+		cleanRelativePath = "avatars/" + cleanRelativePath
+	}
+	fullURL := fmt.Sprintf("%s/%s", baseURLClean, cleanRelativePath)
+
+	// 記錄生成的 URL 用於除錯
+	s.logger.Info().
+		Str("relative_path", *relativePath).
+		Str("clean_relative_path", cleanRelativePath).
+		Str("base_url", baseURLClean).
+		Str("full_url", fullURL).
+		Msg("生成司機頭像完整URL")
+
+	return fullURL
 }
 
 // UpdateDriverDeviceInfo 更新司機設備資訊

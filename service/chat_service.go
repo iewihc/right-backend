@@ -436,17 +436,25 @@ func (cs *ChatService) GetFileURL(relativePath string) string {
 		return ""
 	}
 
-	// 檢查 baseURL 是否已經包含 uploads 路徑
 	baseURL := strings.TrimSuffix(cs.baseURL, "/")
 	cleanRelativePath := strings.TrimPrefix(relativePath, "/")
 
-	// 如果 baseURL 已經包含 /uploads 且 relativePath 也以 uploads 開頭，避免重複
-	if strings.HasSuffix(baseURL, "/uploads") && strings.HasPrefix(cleanRelativePath, "uploads/") {
-		// 移除 relativePath 中的 uploads/ 前綴
-		cleanRelativePath = strings.TrimPrefix(cleanRelativePath, "uploads/")
+	// 確保 relativePath 以 uploads/ 開頭
+	if !strings.HasPrefix(cleanRelativePath, "uploads/") {
+		cleanRelativePath = "uploads/" + cleanRelativePath
 	}
 
-	return fmt.Sprintf("%s/%s", baseURL, cleanRelativePath)
+	fullURL := fmt.Sprintf("%s/%s", baseURL, cleanRelativePath)
+
+	// 記錄生成的 URL 用於除錯
+	cs.logger.Info().
+		Str("relative_path", relativePath).
+		Str("clean_relative_path", cleanRelativePath).
+		Str("base_url", baseURL).
+		Str("full_url", fullURL).
+		Msg("生成檔案完整URL")
+
+	return fullURL
 }
 
 // ConvertMessageURLs 轉換消息中的文件URL為完整URL
@@ -923,7 +931,20 @@ func (cs *ChatService) sendDiscordChatNotification(ctx context.Context, orderID,
 			messageContent = "(空消息)"
 		}
 	case model.MessageTypeImage:
-		messageContent = "圖片"
+		if imageURL != nil {
+			// 檢查 imageURL 是否已經是完整 URL
+			var fullImageURL string
+			if strings.HasPrefix(*imageURL, "http://") || strings.HasPrefix(*imageURL, "https://") {
+				// 已經是完整 URL，直接使用
+				fullImageURL = *imageURL
+			} else {
+				// 是相對路徑，需要轉換為完整 URL
+				fullImageURL = cs.GetFileURL(*imageURL)
+			}
+			messageContent = fmt.Sprintf("圖片: %s", fullImageURL)
+		} else {
+			messageContent = "圖片"
+		}
 	case model.MessageTypeAudio:
 		messageContent = "語音消息"
 	default:
