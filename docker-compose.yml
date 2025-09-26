@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # MongoDB 資料庫
+  mongodb:
+    image: mongo:7.0
+    container_name: right-mongodb
+    ports:
+      - "27020:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=96787421
+    volumes:
+      - mongodb-data:/data/db
+      - mongodb-config:/data/configdb
+    networks:
+      - right-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis 快取服務
+  redis:
+    image: redis:7.2-alpine
+    container_name: right-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass 96787421
+    volumes:
+      - redis-data:/data
+    networks:
+      - right-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "96787421", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # RabbitMQ 訊息佇列
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: right-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port
+      - "15672:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=96787421
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - right-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Right Backend 應用程式
+  right-backend:
+    image: right-backend-fast:latest
+    container_name: right-backend-app
+    ports:
+      - "8090:8090"
+    environment:
+      - GO_ENV=production
+      # MongoDB 連線設定
+      - MONGODB_URI=mongodb://admin:96787421@mongodb:27017/right_db?authSource=admin
+      # Redis 連線設定
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=96787421
+      # RabbitMQ 連線設定
+      - RABBITMQ_URL=amqp://admin:96787421@rabbitmq:5672/
+      # OpenTelemetry 設定 (使用 gRPC 協議，效能更佳)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    volumes:
+      - ./config.yml:/config.yml:ro
+    networks:
+      - right-network
+      - right-backend-observability
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb-data:
+    driver: local
+  mongodb-config:
+    driver: local
+  redis-data:
+    driver: local
+  rabbitmq-data:
+    driver: local
+
+networks:
+  right-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+  right-backend-observability:
+    external: true

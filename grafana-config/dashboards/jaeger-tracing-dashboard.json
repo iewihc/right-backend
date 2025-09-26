@@ -1,0 +1,532 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "jaeger",
+        "uid": "jaeger-uid"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=\"/order-schedule/accept\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "接受預約單 (95th)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=~\"/order-schedule/.*/activate\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "啟動預約單 (95th)",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=\"/driver/arrive-pickup-location\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "司機抵達 (95th)",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=~\"/drivers/orders/.*/upload-pickup-certificate\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "拍照上傳 (95th)",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=~\"/drivers/orders/.*/skip-pickup-certificate\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "略過拍照 (95th)",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=~\"/drivers/orders/.*/onboard\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "客人上車 (95th)",
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=\"/drivers/complete-order\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "完成訂單 (95th)",
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{route=\"/drivers/reject-order\", job=\"right-backend-app\"}[5m])) * 1000",
+          "format": "time_series",
+          "legendFormat": "拒絕訂單 (95th)",
+          "refId": "H"
+        }
+      ],
+      "title": "🚗 司機操作流程 - 95th 百分位響應時間",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-uid"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=\"/order-schedule/accept\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=\"/order-schedule/accept\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "接受預約單",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=~\"/order-schedule/.*/activate\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=~\"/order-schedule/.*/activate\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "啟動預約單",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=\"/driver/arrive-pickup-location\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=\"/driver/arrive-pickup-location\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "司機抵達",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=~\"/drivers/orders/.*/upload-pickup-certificate\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=~\"/drivers/orders/.*/upload-pickup-certificate\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "拍照上傳",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=~\"/drivers/orders/.*/skip-pickup-certificate\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=~\"/drivers/orders/.*/skip-pickup-certificate\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "略過拍照",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=~\"/drivers/orders/.*/onboard\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=~\"/drivers/orders/.*/onboard\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "客人上車",
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=\"/drivers/complete-order\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=\"/drivers/complete-order\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "完成訂單",
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "(rate(http_requests_total{route=\"/drivers/reject-order\", status_code=~\"4..|5..\", job=\"right-backend-app\"}[5m]) / rate(http_requests_total{route=\"/drivers/reject-order\", job=\"right-backend-app\"}[5m])) * 100",
+          "format": "time_series",
+          "legendFormat": "拒絕訂單",
+          "refId": "H"
+        }
+      ],
+      "title": "❌ 司機操作流程 - 錯誤率 %",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-uid"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=\"/order-schedule/accept\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "接受預約單",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=~\"/order-schedule/.*/activate\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "啟動預約單",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=\"/driver/arrive-pickup-location\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "司機抵達",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=~\"/drivers/orders/.*/upload-pickup-certificate\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "拍照上傳",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=~\"/drivers/orders/.*/skip-pickup-certificate\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "略過拍照",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=~\"/drivers/orders/.*/onboard\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "客人上車",
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=\"/drivers/complete-order\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "完成訂單",
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-uid"
+          },
+          "expr": "rate(http_requests_total{route=\"/drivers/reject-order\", job=\"right-backend-app\"}[5m])",
+          "format": "time_series",
+          "legendFormat": "拒絕訂單",
+          "refId": "H"
+        }
+      ],
+      "title": "📊 司機操作流程 - 請求率 (QPS)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 37,
+  "style": "dark",
+  "tags": ["jaeger", "tracing", "driver-operations"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "📍 司機操作流程追蹤 - Jaeger Tracing",
+  "uid": "jaeger-driver-tracing",
+  "version": 1,
+  "weekStart": ""
+}

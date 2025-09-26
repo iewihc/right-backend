@@ -1,0 +1,28 @@
+app:  
+  is_crawler: true  
+driver_blacklist:  
+  enabled: true  
+  expiry_minutes: 10  # 司機黑名單過期時間(分鐘)  
+mongodb:  
+  uri: "mongodb://localhost:27017"  
+  database: "right_db"  
+redis:  
+  addr: "localhost:6379"  
+  password: "96787421"  
+  db: 0  
+rabbitmq:  
+  url: "amqp://admin:96787421@localhost:5672/"  
+google:  
+  api_key: "AIzaSyDGkDHuF2cC3kq56Bcab8cmt3KlNiwCMc4"  
+fcm:  
+  service_account_path: "infra/google-services.json"  
+  server_key: "BKtFz0pdDSazE-z3l-q8hAw0pw2rM3-TvrVDShDsA7I6QCQy1UDsDzA2fV0a0mM_b99MfBY2ffe8arZCS-xjqug"  # 保留舊設定以防回退  
+jwt:  
+  secret_key: "right-backend-jwt-secret-key-2025-super-secure"  
+  expires_hours: 9999  # 7天 = 168小時  
+discord:  
+  bot_token: "YOUR_DISCORD_BOT_TOKEN_HERE"  
+  channel_id: "1321748815094210621"  # 請替換為實際的Discord頻道ID  
+line:  
+  enabled: false  # 全域開關  
+cert_base_url: "https://right.mr-chi-tech.com"

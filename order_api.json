@@ -1,0 +1,250 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TaxiGo Order API",
+    "version": "1.0.0",
+    "description": "用於管理訂單的 API，包括創建、查詢和更新。"
+  },
+  "servers": [
+    {
+      "url": "https://your-api-server.com",
+      "description": "正式環境伺服器"
+    }
+  ],
+  "paths": {
+    "/orders": {
+      "post": {
+        "operationId": "create-order",
+        "summary": "客服人員創建新訂單",
+        "tags": ["orders"],
+        "requestBody": {
+          "description": "訂單建立的詳細資訊",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "訂單成功建立",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "建立訂單失敗"
+          }
+        }
+      },
+      "get": {
+        "operationId": "get-orders",
+        "summary": "獲取所有訂單",
+        "tags": ["orders"],
+        "responses": {
+          "200": {
+            "description": "成功獲取訂單列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "獲取訂單列表失敗"
+          }
+        }
+      }
+    },
+    "/orders/{id}": {
+      "get": {
+        "operationId": "get-order-by-id",
+        "summary": "根據ID獲取訂單",
+        "tags": ["orders"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "要查詢的訂單ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功獲取訂單資訊",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "訂單不存在"
+          }
+        }
+      }
+    },
+    "/orders/{id}/status": {
+      "put": {
+        "operationId": "update-order-status",
+        "summary": "更新訂單狀態",
+        "tags": ["orders"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "要更新的訂單ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrderStatusInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "訂單狀態成功更新",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "更新訂單狀態失敗"
+          }
+        }
+      }
+    },
+    "/orders/{id}/pickup-address": {
+      "put": {
+        "operationId": "update-order-pickup-address",
+        "summary": "更改客戶上車地址",
+        "tags": ["orders"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "要更新的訂單ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePickupAddressInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "上車地址成功更新",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "更新上車地址失敗"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Order": {
+        "type": "object",
+        "properties": {
+          "_id": { "type": "string", "example": "684a73ad0e3a583c37e4b30d" },
+          "type": { "type": "string", "enum": ["即時", "預約", "跑腿"] },
+          "status": { "type": "string", "enum": ["等待接單", "前往上車點", "司機抵達", "執行任務", "完成", "乘客取消", "流單"] },
+          "customer": { "$ref": "#/components/schemas/Customer" },
+          "driver": { "$ref": "#/components/schemas/Driver" }
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "input_pickup_address": { "type": "string" },
+          "remarks": { "type": "string" },
+          "input_dest_address": { "type": "string" }
+        }
+      },
+      "Driver": {
+        "type": "object",
+        "properties": {
+          "assigned_driver": { "type": "string" },
+          "car_no": { "type": "string" }
+        }
+      },
+      "CreateOrderInput": {
+        "type": "object",
+        "properties": {
+          "body": { "$ref": "#/components/schemas/Order" }
+        }
+      },
+      "OrderResponse": {
+        "type": "object",
+        "properties": {
+          "body": { "$ref": "#/components/schemas/Order" }
+        }
+      },
+      "OrdersResponse": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Order" }
+          }
+        }
+      },
+      "UpdateOrderStatusInput": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["等待接單", "前往上車點", "司機抵達", "執行任務", "完成", "乘客取消", "流單"] }
+        }
+      },
+      "UpdatePickupAddressInput": {
+        "type": "object",
+        "properties": {
+          "new_pickup_address": { "type": "string" }
+        }
+      }
+    }
+  }
+}

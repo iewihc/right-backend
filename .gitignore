@@ -1,0 +1,41 @@
+# Go build
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go modules
+vendor/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+.DS_Store
+
+# Logs
+*.log
+
+# Docker
+*.env
+docker-compose.override.yml
+
+# Config
+config.yml
+
+# Coverage
+coverage.out
+
+# Others
+node_modules/ 
+download-pickup-certificate/
+/sample/
+/uploads/uploads/
+/uploads/
+/init-db/

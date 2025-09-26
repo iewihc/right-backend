@@ -1,0 +1,46 @@
+# 超快速 Dockerfile - 優化 Playwright 安裝
+FROM golang:1.24.2-bullseye as modules
+COPY go.mod go.sum /modules/
+WORKDIR /modules
+RUN go mod download
+
+FROM golang:1.24.2-bullseye as builder
+COPY --from=modules /go/pkg /go/pkg
+COPY . /workdir
+WORKDIR /workdir
+
+# 安裝 Playwright CLI
+RUN PWGO_VER=$(grep -oE "playwright-go v\S+" /workdir/go.mod | sed 's/playwright-go //g') \
+    && go install github.com/playwright-community/playwright-go/cmd/playwright@${PWGO_VER}
+
+# 編譯 Go 應用
+RUN GOOS=linux GOARCH=amd64 go build -o /bin/right-backend-app .
+
+# 最終階段 - 使用更輕量的基礎鏡像並優化 Playwright 安裝
+FROM debian:bullseye-slim
+COPY --from=builder /go/bin/playwright /bin/right-backend-app /
+COPY config.yml /config.yml
+
+# 設置 Playwright 環境變量以加速下載
+ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+ENV DEBIAN_FRONTEND=noninteractive
+ENV APT_LISTCHANGES_FRONTEND=none
+
+# 一次性安裝所有依賴，並行下載，最大化緩存利用
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        wget \
+        unzip \
+        && \
+    # 安裝 Playwright 和 Chromium（並行下載）
+    /playwright install chromium && \
+    /playwright install-deps chromium && \
+    # 清理緩存
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/* /var/tmp/*
+
+EXPOSE 8090
+CMD ["/right-backend-app"]

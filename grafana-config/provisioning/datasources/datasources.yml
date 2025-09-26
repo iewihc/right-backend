@@ -1,0 +1,63 @@
+apiVersion: 1
+
+datasources:
+  # Jaeger 數據源
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    uid: jaeger-uid
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET
+
+  # Prometheus 數據源
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    uid: prometheus-uid
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: 2.40.0
+      cacheLevel: 'High'
+      disableRecordingRules: false
+      incrementalQueryOverlapWindow: 10m
+
+  # MongoDB 數據源 (通過 JSON API)
+  - name: MongoDB
+    type: grafana-simple-json-datasource
+    access: proxy
+    url: http://right-backend-app:8090/api/monitoring/mongodb
+    uid: mongodb-uid
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET
+
+  # Redis 數據源
+  - name: Redis
+    type: grafana-simple-json-datasource
+    access: proxy
+    url: http://right-backend-app:8090/api/monitoring/redis
+    uid: redis-uid
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET
+
+  # RabbitMQ 數據源
+  - name: RabbitMQ
+    type: grafana-simple-json-datasource
+    access: proxy
+    url: http://right-backend-app:8090/api/monitoring/rabbitmq
+    uid: rabbitmq-uid
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET

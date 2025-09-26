@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Seq - 結構化日誌服務器
+  seq-logserver:
+    image: datalust/seq:latest
+    container_name: right-seq-logserver
+    ports:
+      - "5341:80"      # Seq Web UI
+      - "5342:5342"    # Seq ingestion endpoint
+    environment:
+      - ACCEPT_EULA=Y
+      - SEQ_API_CANONICALURI=http://localhost:5341
+      - SEQ_FIRSTRUN_ADMINPASSWORD=admin123
+    volumes:
+      - seq-data:/data
+      - seq-logs:/logs
+    networks:
+      - logging-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  seq-data:
+    driver: local
+  seq-logs:
+    driver: local
+
+networks:
+  logging-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

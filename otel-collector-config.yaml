@@ -1,0 +1,86 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins: ["*"]
+          allowed_headers: ["*"]
+
+  # Prometheus 收集器 - 收集應用程式指標
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'right-backend'
+          static_configs:
+            - targets: ['host.docker.internal:8080']
+          scrape_interval: 10s
+          metrics_path: /metrics
+
+processors:
+  # 批次處理器 - 提高性能
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # 記憶體限制處理器
+  memory_limiter:
+    limit_mib: 256
+    check_interval: 1s
+
+  # 資源處理器 - 添加服務資訊
+  resource:
+    attributes:
+      - key: service.namespace
+        value: "taxi-go"
+        action: insert
+      - key: deployment.environment
+        value: "development"
+        action: insert
+
+
+exporters:
+  # OTLP exporter for Jaeger - 追蹤資料
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Prometheus exporter - 指標資料
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    const_labels:
+      service: "right-backend"
+
+  # Debug exporter - 開發時使用
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    # 追蹤資料管道
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/jaeger, debug]
+
+    # 指標資料管道
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, debug]
+
+    # 日誌資料管道
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

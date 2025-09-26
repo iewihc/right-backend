@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # OpenTelemetry Collector - 統一遙測資料收集
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus metrics endpoint
+      - "13133:13133" # Health check endpoint
+    environment:
+      - GOMEMLIMIT=160MiB
+    networks:
+      - observability
+    depends_on:
+      - jaeger
+      - prometheus
+
+  # Jaeger - 分散式追蹤系統
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger-tracing
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "14250:14250"   # gRPC
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=info
+    networks:
+      - observability
+    # 確保 Jaeger 內部的 OTLP 端口可用
+
+  # Prometheus - 指標收集與存儲
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-metrics
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus-config.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - observability
+      - right-network
+
+  # Grafana - 數據可視化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-config/provisioning:/etc/grafana/provisioning
+      - ./grafana-config/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - observability
+      - right-network
+    depends_on:
+      - prometheus
+      - jaeger
+
+volumes:
+  prometheus-data:
+    name: prometheus-metrics
+  grafana-data:
+    name: grafana-dashboards
+
+networks:
+  observability:
+    name: right-backend-observability
+    driver: bridge
+  # 連接到主應用網絡以訪問 MongoDB/Redis/RabbitMQ
+  right-network:
+    external: true
+    name: right-backend_right-network

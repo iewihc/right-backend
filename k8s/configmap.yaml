@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: right-backend-config
+  namespace: right-backend
+data:
+  config.yml: |
+    app:  
+      is_crawler: true  
+    mongodb:  
+      uri: "mongodb://admin:96787421@mongodb-service:27017"  
+      database: "right-prod-db"  
+    redis:  
+      addr: "redis-service:6379"  
+      password: "96787421"  
+      db: 0  
+    rabbitmq:  
+      url: "amqp://admin:96787421@rabbitmq-service:5672/"  
+    google:  
+      api_key: "AIzaSyDGkDHuF2cC3kq56Bcab8cmt3KlNiwCMc4"  
+    amap:  
+      api_key: "9922aaa8a8b02328698502dd01e87cbb"  
+    fcm:  
+      server_key: "YOUR_FCM_SERVER_KEY"  
+    jwt:  
+      secret_key: "taxi-go-jwt-secret-key-2025-super-secure"  
+      expires_hours: 24
+    discord:  
+      bot_token: "YOUR_DISCORD_BOT_TOKEN_HERE" 
+    cert_base_url: "https://prod.mr-chi-tech.com"
+    seq:
+      endpoint: "https://seq.mr-chi-tech.com"
+      api_key: "xlXtEzkPCbaRLEQGCoxg"

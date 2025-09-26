@@ -1,0 +1,186 @@
+# Azure DevOps Pipeline for Right-Backend Production Deployment
+# 用於 Right-Backend 生產環境部署的 Azure DevOps Pipeline
+
+trigger:
+  branches:
+    include:
+    - prod
+  paths:
+    exclude:
+    - '*.md'
+    - 'docs/*'
+
+variables:
+  # Docker 相關變數
+  imageRepository: 'right-backend'
+  containerRegistry: 'localhost:32000'  # microk8s registry
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+  
+  # Kubernetes 相關變數
+  k8sNamespace: 'right-backend'
+  deploymentName: 'right-backend-deployment'
+  
+  # 版本資訊
+  Go.version: '1.24.2'
+  
+
+# 指定使用 mr-chi agent
+pool:
+  name: 'Default'
+  demands:
+    - agent.name -equals mr-chi
+
+stages:
+- stage: CI
+  displayName: 'Continuous Integration'
+  jobs:
+  - job: Build
+    displayName: 'Build and Test'
+    steps:
+    
+    # 設置 Go 環境
+    - task: GoTool@0
+      inputs:
+        version: '$(Go.version)'
+      displayName: 'Set up Go $(Go.version)'
+    
+    # 檢出程式碼
+    - checkout: self
+      displayName: 'Checkout source code'
+    
+    # Go 模組下載和驗證
+    - script: |
+        echo "=== Go Module Download and Verification ==="
+        go mod download
+        go mod verify
+        go mod tidy
+      displayName: 'Go Module Setup'
+    
+    
+    # Go Build
+    - script: |
+        echo "=== Building Go Application ==="
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o right-backend .
+        echo "Build completed successfully"
+        ls -la right-backend
+      displayName: 'Build Go Application'
+    
+    # 建立 Docker 映像
+    - script: |
+        echo "=== Building Docker Image ==="
+        docker build -t $(containerRegistry)/$(imageRepository):$(tag) -f $(dockerfilePath) .
+        docker tag $(containerRegistry)/$(imageRepository):$(tag) $(containerRegistry)/$(imageRepository):latest
+        echo "Docker image built successfully"
+        docker images | grep $(imageRepository)
+      displayName: 'Build Docker Image'
+    
+    # 推送到私有 Registry
+    - script: |
+        echo "=== Pushing to microk8s Registry ==="
+        docker push $(containerRegistry)/$(imageRepository):$(tag)
+        docker push $(containerRegistry)/$(imageRepository):latest
+        echo "Images pushed successfully"
+      displayName: 'Push Docker Images'
+
+#- stage: CD
+#  displayName: 'Continuous Deployment'
+#  dependsOn: CI
+#  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/prod'))
+#  jobs:
+#  - job: Deploy
+#    displayName: 'Deploy to Production'
+#    steps:
+#
+#    # 部署基礎設施和應用配置
+#    - script: |
+#        echo "=== Deploying Infrastructure Services ==="
+#        kubectl apply -f k8s/mongodb-k8s.yaml
+#        kubectl apply -f k8s/redis-k8s.yaml
+#        kubectl apply -f k8s/rabbitmq-k8s.yaml
+#
+#        echo "=== Waiting for infrastructure services to be ready ==="
+#        kubectl wait --for=condition=ready pod -l app=mongodb -n $(k8sNamespace) --timeout=300s
+#        kubectl wait --for=condition=ready pod -l app=redis -n $(k8sNamespace) --timeout=180s
+#        kubectl wait --for=condition=ready pod -l app=rabbitmq -n $(k8sNamespace) --timeout=240s
+#
+#        echo "=== Applying Application ConfigMap ==="
+#        kubectl apply -f k8s/configmap.yaml
+#        echo "Infrastructure and ConfigMap deployed successfully"
+#      displayName: 'Deploy Infrastructure and ConfigMap'
+#
+#    # 清理舊的 Pods (滾動更新)
+#    - script: |
+#        echo "=== Performing Rolling Update ==="
+#
+#        # 更新 Deployment 映像
+#        kubectl set image deployment/$(deploymentName) \
+#          right-backend=$(containerRegistry)/$(imageRepository):$(tag) \
+#          --namespace=$(k8sNamespace)
+#
+#        # 等待滾動更新完成
+#        kubectl rollout status deployment/$(deploymentName) \
+#          --namespace=$(k8sNamespace) \
+#          --timeout=600s
+#
+#        echo "Rolling update completed successfully"
+#      displayName: 'Rolling Update Deployment'
+#
+#    # 驗證部署狀態
+#    - script: |
+#        echo "=== Deployment Verification ==="
+#
+#        # 檢查 Pod 狀態
+#        echo "Checking pod status:"
+#        kubectl get pods --namespace=$(k8sNamespace) -l app=right-backend
+#
+#        # 檢查服務狀態
+#        echo "Checking service status:"
+#        kubectl get services --namespace=$(k8sNamespace)
+#
+#        # 等待所有 Pod 準備就緒
+#        kubectl wait --for=condition=ready pod \
+#          -l app=right-backend \
+#          --namespace=$(k8sNamespace) \
+#          --timeout=300s
+#
+#        # 健康檢查
+#        echo "Testing application health:"
+#        sleep 10  # 等待服務完全啟動
+#
+#        # 通過 NodePort 測試應用程序
+#        NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+#        NODE_PORT=$(kubectl get service right-backend-nodeport -n $(k8sNamespace) -o jsonpath='{.spec.ports[0].nodePort}')
+#
+#        echo "Testing via NodePort: http://${NODE_IP}:${NODE_PORT}/health"
+#        curl -f http://${NODE_IP}:${NODE_PORT}/health || echo "Health check failed"
+#
+#        echo "Deployment verification completed"
+#      displayName: 'Verify Deployment'
+#
+#    # 清理舊的 Docker 映像 (可選)
+#    - script: |
+#        echo "=== Cleaning up old Docker images ==="
+#        docker system prune -f
+#        echo "Docker cleanup completed"
+#      displayName: 'Docker Cleanup'
+#      condition: succeededOrFailed()
+#
+## 通知和日誌
+#- stage: Notify
+#  displayName: 'Post Deployment'
+#  dependsOn: CD
+#  condition: always()
+#  jobs:
+#  - job: Notification
+#    displayName: 'Send Notifications'
+#    steps:
+#    - script: |
+#        echo "=== Deployment Summary ==="
+#        echo "Build ID: $(Build.BuildId)"
+#        echo "Source Branch: $(Build.SourceBranch)"
+#        echo "Deployment Status: $(Agent.JobStatus)"
+#        echo "Docker Image: $(containerRegistry)/$(imageRepository):$(tag)"
+#        echo "Seq Logging: https://seq.mr-chi-tech.com"
+#        echo "Production URL: https://prod.mr-chi-tech.com"
+#      displayName: 'Deployment Summary'

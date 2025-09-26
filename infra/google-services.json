@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1063282269529",
+    "project_id": "right-app-d209e",
+    "storage_bucket": "right-app-d209e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1063282269529:android:e5ed534a53dd3d3db0c048",
+        "android_client_info": {
+          "package_name": "com.mr.chi.cosmos.driver.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBRxZjlCF3t9mbiCXc3c26fNwo8_9snJEM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

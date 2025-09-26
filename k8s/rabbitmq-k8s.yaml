@@ -1,0 +1,193 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-secret
+  namespace: right-backend
+type: Opaque
+data:
+  # admin:96787421 (base64 encoded)
+  username: YWRtaW4=
+  password: OTY3ODc0MjE=
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+  namespace: right-backend
+data:
+  rabbitmq.conf: |
+    # RabbitMQ 配置文件
+    default_user = admin
+    default_pass = 96787421
+    default_vhost = right-backend
+    disk_free_limit.absolute = 1GB
+    vm_memory_high_watermark.absolute = 1GB
+    collect_statistics_interval = 30000
+    management.tcp.port = 15672
+    
+  definitions.json: |
+    {
+      "users": [
+        {
+          "name": "admin",
+          "password_hash": "rQfgMw5EWEU8wuGJRTBYb6xE7a7Zd1RGT7x5XkqJ4nE=",
+          "hashing_algorithm": "rabbit_password_hashing_sha256",
+          "tags": "administrator"
+        }
+      ],
+      "vhosts": [
+        {
+          "name": "right-backend"
+        }
+      ],
+      "permissions": [
+        {
+          "user": "admin",
+          "vhost": "right-backend",
+          "configure": ".*",
+          "write": ".*",
+          "read": ".*"
+        }
+      ],
+      "parameters": [],
+      "global_parameters": [
+        {
+          "name": "internal_cluster_id",
+          "value": "rabbitmq-cluster-id-right-backend"
+        }
+      ],
+      "policies": [],
+      "queues": [],
+      "exchanges": [],
+      "bindings": []
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-pvc
+  namespace: right-backend
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: microk8s-hostpath
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: right-backend
+  labels:
+    app: rabbitmq
+spec:
+  serviceName: rabbitmq-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.13-management
+        ports:
+        - containerPort: 5672
+          name: amqp
+        - containerPort: 15672
+          name: management
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: username
+        - name: RABBITMQ_DEFAULT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: password
+        - name: RABBITMQ_DEFAULT_VHOST
+          value: "right-backend"
+        - name: RABBITMQ_VM_MEMORY_HIGH_WATERMARK
+          value: "0.6"
+        - name: RABBITMQ_DISK_FREE_LIMIT
+          value: "1GB"
+        volumeMounts:
+        - name: rabbitmq-data
+          mountPath: /var/lib/rabbitmq
+        - name: rabbitmq-config
+          mountPath: /etc/rabbitmq
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "3Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - -q
+            - ping
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - -q
+            - check_port_connectivity
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: rabbitmq-data
+        persistentVolumeClaim:
+          claimName: rabbitmq-pvc
+      - name: rabbitmq-config
+        configMap:
+          name: rabbitmq-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-service
+  namespace: right-backend
+  labels:
+    app: rabbitmq
+spec:
+  ports:
+  - port: 5672
+    targetPort: 5672
+    name: amqp
+  - port: 15672
+    targetPort: 15672
+    name: management
+  selector:
+    app: rabbitmq
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-management
+  namespace: right-backend
+  labels:
+    app: rabbitmq
+spec:
+  ports:
+  - port: 15672
+    targetPort: 15672
+    nodePort: 30672
+    name: management
+  selector:
+    app: rabbitmq
+  type: NodePort
