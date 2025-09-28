@@ -1160,6 +1160,39 @@ func (c *DriverController) RegisterRoutes(api huma.API) {
 		return &driver.CheckCancelingOrderResponse{Body: *successResponse}, nil
 	})
 
+	// 獲取流單列表
+	huma.Register(api, huma.Operation{
+		OperationID: "get-failed-orders-for-driver",
+		Method:      "GET",
+		Path:        "/drivers/failed-orders",
+		Summary:     "獲取流單列表（司機版）",
+		Description: "司機獲取按距離排序的流單列表，自動使用司機當前位置計算距離",
+		Tags:        []string{"drivers"},
+		Middlewares: huma.Middlewares{c.authMiddleware.Auth()},
+		Security: []map[string][]string{
+			{"bearerAuth": {}},
+		},
+	}, func(ctx context.Context, input *order.GetFailedOrdersInput) (*order.GetFailedOrdersResponse, error) {
+		// 從JWT token中獲取司機資訊
+		driverFromToken, err := auth.GetDriverFromContext(ctx)
+		if err != nil {
+			c.logger.Error().Err(err).Msg("無法從token中獲取司機資訊")
+			return nil, huma.Error401Unauthorized("無法獲取司機資訊")
+		}
+
+		failedOrders, total, err := c.orderService.GetFailedOrders(ctx, driverFromToken, input.Limit)
+		if err != nil {
+			c.logger.Error().Err(err).Str("driver_id", driverFromToken.ID.Hex()).Msg("獲取流單列表失敗")
+			return nil, huma.Error500InternalServerError("獲取流單列表失敗", err)
+		}
+
+		response := &order.GetFailedOrdersResponse{}
+		response.Body.Data = failedOrders
+		response.Body.Total = total
+
+		return response, nil
+	})
+
 	// 上傳司機頭像
 	huma.Register(api, huma.Operation{
 		OperationID: "upload-driver-avatar",

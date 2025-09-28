@@ -500,6 +500,12 @@ func main() {
 		go bgDispatcher.Start(context.Background())
 		go scheduledDispatcher.Start(context.Background())
 
+		// 啟動 Redis 自動清理監聽器
+		if bgDispatcher.EventManager != nil {
+			go bgDispatcher.EventManager.StartCleanupWatcher(context.Background())
+			log.Info().Msg("Redis 自動清理監聽器已啟動")
+		}
+
 		// 啟動 Discord 事件處理器
 		if discordEventHandler != nil {
 			discordEventHandler.Start()

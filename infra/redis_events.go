@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -630,4 +631,281 @@ func (rem *RedisEventManager) AcquireOrderRejectLock(ctx context.Context, orderI
 	}
 
 	return true, releaseLock, nil
+}
+
+// AtomicNotifyDriver 原子性檢查並通知司機
+// 一次性檢查司機狀態、訂單狀態並設置鎖定，防止競爭狀態
+func (rem *RedisEventManager) AtomicNotifyDriver(ctx context.Context, driverID, orderID, dispatcherID string, ttl time.Duration) (success bool, reason string, err error) {
+	script := `
+		local driver_lock_key = "driver_notification_lock:" .. ARGV[1]
+		local driver_state_key = "driver_state:" .. ARGV[1]
+		local order_claim_key = "order_claimed:" .. ARGV[2]
+		local dispatcher_id = ARGV[3]
+		local ttl = tonumber(ARGV[4])
+		local start_time = ARGV[5]
+
+		-- 檢查司機是否已被鎖定（正在處理其他訂單通知）
+		if redis.call("EXISTS", driver_lock_key) == 1 then
+			local existing_dispatcher = redis.call("GET", driver_lock_key)
+			return {0, "driver_locked_by:" .. existing_dispatcher}
+		end
+
+		-- 檢查司機當前狀態
+		local current_status = redis.call("HGET", driver_state_key, "status")
+		local current_order = redis.call("HGET", driver_state_key, "current_order_id")
+
+		-- 如果司機已有訂單或正在處理訂單，拒絕
+		if current_order and current_order ~= "" then
+			return {0, "driver_has_order:" .. current_order}
+		end
+
+		if current_status == "busy" or current_status == "processing" then
+			return {0, "driver_busy:" .. current_status}
+		end
+
+		-- 檢查訂單是否已被其他調度器聲明
+		local order_claimer = redis.call("GET", order_claim_key)
+		if order_claimer and order_claimer ~= dispatcher_id then
+			return {0, "order_claimed_by:" .. order_claimer}
+		end
+
+		-- 原子性設置所有狀態
+		redis.call("SETEX", driver_lock_key, ttl, dispatcher_id)
+		redis.call("SETEX", order_claim_key, ttl, dispatcher_id)
+		redis.call("HSET", driver_state_key,
+			"status", "receiving_notification",
+			"notification_order_id", ARGV[2],
+			"notification_dispatcher", dispatcher_id,
+			"notification_start", start_time
+		)
+		redis.call("EXPIRE", driver_state_key, ttl)
+
+		return {1, "success"}
+	`
+
+	startTime := fmt.Sprintf("%d", time.Now().Unix())
+	result, err := rem.client.Eval(ctx, script, []string{},
+		driverID, orderID, dispatcherID, int(ttl.Seconds()), startTime).Result()
+
+	if err != nil {
+		rem.logger.Error().Err(err).
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Str("dispatcher_id", dispatcherID).
+			Msg("原子性司機通知檢查失敗")
+		return false, "redis_error", err
+	}
+
+	resultSlice := result.([]interface{})
+	success = resultSlice[0].(int64) == 1
+	reason = resultSlice[1].(string)
+
+	if success {
+		rem.logger.Info().
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Str("dispatcher_id", dispatcherID).
+			Dur("ttl", ttl).
+			Msg("✅ 原子性司機通知檢查成功，司機和訂單已鎖定")
+	} else {
+		rem.logger.Debug().
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Str("dispatcher_id", dispatcherID).
+			Str("reason", reason).
+			Msg("原子性司機通知檢查失敗")
+	}
+
+	return success, reason, nil
+}
+
+// ReleaseDriverNotification 釋放司機通知狀態
+func (rem *RedisEventManager) ReleaseDriverNotification(ctx context.Context, driverID, orderID, dispatcherID string) error {
+	script := `
+		local driver_lock_key = "driver_notification_lock:" .. ARGV[1]
+		local driver_state_key = "driver_state:" .. ARGV[1]
+		local order_claim_key = "order_claimed:" .. ARGV[2]
+		local dispatcher_id = ARGV[3]
+
+		-- 只有原調度器可以釋放
+		local current_locker = redis.call("GET", driver_lock_key)
+		if current_locker == dispatcher_id then
+			redis.call("DEL", driver_lock_key, order_claim_key)
+			redis.call("HDEL", driver_state_key,
+				"notification_order_id",
+				"notification_dispatcher",
+				"notification_start"
+			)
+			-- 重置司機狀態為閒置（如果沒有當前訂單）
+			local current_order = redis.call("HGET", driver_state_key, "current_order_id")
+			if not current_order or current_order == "" then
+				redis.call("HSET", driver_state_key, "status", "idle")
+			end
+			return "released"
+		end
+
+		return "not_owner"
+	`
+
+	result, err := rem.client.Eval(ctx, script, []string{},
+		driverID, orderID, dispatcherID).Result()
+
+	if err != nil {
+		rem.logger.Error().Err(err).
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Str("dispatcher_id", dispatcherID).
+			Msg("釋放司機通知狀態失敗")
+		return err
+	}
+
+	if result.(string) == "released" {
+		rem.logger.Debug().
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Str("dispatcher_id", dispatcherID).
+			Msg("司機通知狀態已釋放")
+	} else {
+		rem.logger.Warn().
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Str("dispatcher_id", dispatcherID).
+			Msg("無法釋放司機通知狀態 - 非鎖持有者")
+	}
+
+	return nil
+}
+
+// AtomicAcceptOrder 原子性接單檢查
+// 供司機接單 API 使用，確保司機只能接受正在通知的訂單
+func (rem *RedisEventManager) AtomicAcceptOrder(ctx context.Context, driverID, orderID string) (success bool, reason string, err error) {
+	script := `
+		local driver_state_key = "driver_state:" .. ARGV[1]
+		local driver_lock_key = "driver_notification_lock:" .. ARGV[1]
+		local order_claim_key = "order_claimed:" .. ARGV[2]
+		local accept_time = ARGV[3]
+
+		-- 檢查司機是否正在接收這個訂單的通知
+		local expected_order = redis.call("HGET", driver_state_key, "notification_order_id")
+		if expected_order ~= ARGV[2] then
+			return {0, "not_expecting_this_order"}
+		end
+
+		-- 檢查司機當前是否有其他訂單
+		local current_order = redis.call("HGET", driver_state_key, "current_order_id")
+		if current_order and current_order ~= "" and current_order ~= ARGV[2] then
+			return {0, "already_has_order:" .. current_order}
+		end
+
+		-- 原子性設置司機接單狀態
+		redis.call("HSET", driver_state_key,
+			"status", "busy",
+			"current_order_id", ARGV[2],
+			"order_accepted_at", accept_time
+		)
+
+		-- 清除通知狀態但保留訂單聲明（由調度器處理）
+		redis.call("HDEL", driver_state_key,
+			"notification_order_id",
+			"notification_dispatcher",
+			"notification_start"
+		)
+		redis.call("DEL", driver_lock_key)
+
+		return {1, "accepted"}
+	`
+
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+	result, err := rem.client.Eval(ctx, script, []string{},
+		driverID, orderID, timestamp).Result()
+
+	if err != nil {
+		rem.logger.Error().Err(err).
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Msg("原子性接單檢查失敗")
+		return false, "redis_error", err
+	}
+
+	resultSlice := result.([]interface{})
+	success = resultSlice[0].(int64) == 1
+	reason = resultSlice[1].(string)
+
+	if success {
+		rem.logger.Info().
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Msg("✅ 司機接單成功")
+	} else {
+		rem.logger.Warn().
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Str("reason", reason).
+			Msg("司機接單失敗")
+	}
+
+	return success, reason, nil
+}
+
+// StartCleanupWatcher 啟動自動清理監聽器
+// 監聽 Redis 過期事件並自動清理相關狀態
+func (rem *RedisEventManager) StartCleanupWatcher(ctx context.Context) {
+	// 開啟鍵空間通知
+	rem.client.ConfigSet(ctx, "notify-keyspace-events", "Ex")
+
+	// 監聽過期事件
+	pubsub := rem.client.PSubscribe(ctx, "__keyevent@*__:expired")
+	defer pubsub.Close()
+
+	rem.logger.Info().Msg("Redis 自動清理監聽器已啟動")
+
+	for msg := range pubsub.Channel() {
+		expiredKey := msg.Payload
+
+		// 處理司機通知鎖過期
+		if strings.HasPrefix(expiredKey, "driver_notification_lock:") {
+			driverID := strings.TrimPrefix(expiredKey, "driver_notification_lock:")
+
+			// 清理相關的狀態
+			cleanupScript := `
+				local driver_state_key = "driver_state:" .. ARGV[1]
+				local notifying_order_key = "notifying_order:" .. ARGV[1]
+
+				-- 檢查司機是否沒有當前訂單，如果沒有則重置為閒置
+				local current_order = redis.call("HGET", driver_state_key, "current_order_id")
+				if not current_order or current_order == "" then
+					redis.call("HSET", driver_state_key, "status", "idle")
+				end
+
+				-- 清除通知相關狀態
+				redis.call("HDEL", driver_state_key,
+					"notification_order_id",
+					"notification_dispatcher",
+					"notification_start"
+				)
+				redis.call("DEL", notifying_order_key)
+
+				return "cleaned"
+			`
+
+			_, err := rem.client.Eval(ctx, cleanupScript, []string{}, driverID).Result()
+			if err != nil {
+				rem.logger.Error().Err(err).
+					Str("driver_id", driverID).
+					Msg("自動清理司機狀態失敗")
+			} else {
+				rem.logger.Debug().
+					Str("driver_id", driverID).
+					Msg("🧹 自動清理過期的司機通知狀態")
+			}
+		}
+
+		// 處理訂單聲明過期
+		if strings.HasPrefix(expiredKey, "order_claimed:") {
+			orderID := strings.TrimPrefix(expiredKey, "order_claimed:")
+			rem.logger.Debug().
+				Str("order_id", orderID).
+				Msg("🧹 訂單聲明已過期，可被其他調度器處理")
+		}
+	}
 }

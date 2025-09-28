@@ -934,35 +934,39 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 			continue
 		}
 
-		// 新增：獲取司機通知鎖（防止重複通知）
+		// 使用新的原子性檢查並通知司機
 		var driverNotificationRelease func()
 		if d.EventManager != nil {
 			lockTTL := sequentialCallTimeout + 5*time.Second // 比等待時間稍長
-			lockAcquired, releaseLock, lockErr := d.EventManager.AcquireDriverNotificationLock(ctx, driver.ID.Hex(), order.ID.Hex(), d.dispatcherID, lockTTL)
+			success, reason, atomicErr := d.EventManager.AtomicNotifyDriver(ctx,
+				driver.ID.Hex(),
+				order.ID.Hex(),
+				d.dispatcherID,
+				lockTTL)
 
-			if lockErr != nil {
-				d.logger.Error().Err(lockErr).
+			if atomicErr != nil {
+				d.logger.Error().Err(atomicErr).
 					Str("short_id", order.ShortID).
 					Int("rank", i+1).
 					Str("car_plate", driver.CarPlate).
-					Msg("獲取司機通知鎖失敗，跳過此司機")
+					Msg("原子性司機通知檢查失敗，跳過此司機")
 				continue
 			}
 
-			if !lockAcquired {
-				d.logger.Info().
+			if !success {
+				d.logger.Debug().
 					Str("short_id", order.ShortID).
 					Int("rank", i+1).
 					Str("car_plate", driver.CarPlate).
-					Msg("🔒 司機正在處理其他訂單通知，跳過")
+					Str("reason", reason).
+					Msg("🔒 司機或訂單不可用，跳過")
 				continue
 			}
 
-			driverNotificationRelease = releaseLock
-			//d.logger.Info().
-			//	Str("short_id", order.ShortID).
-			//	Str("car_plate", driver.CarPlate).
-			//	Msg("🔓 司機通知鎖獲取成功，開始發送FCM")
+			// 設置釋放函數
+			driverNotificationRelease = func() {
+				d.EventManager.ReleaseDriverNotification(ctx, driver.ID.Hex(), order.ID.Hex(), d.dispatcherID)
+			}
 		}
 
 		// 為當前司機客製化預估到達資訊
@@ -1006,48 +1010,7 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 			infra.AttrFloat64("distance_km", distanceKm),
 		)
 
-		// 發送FCM前最後一次檢查司機狀態，防止向已接單司機發送通知
-		var currentDriver model.DriverInfo
-		findErr := d.MongoDB.GetCollection("drivers").FindOne(fcmCtx, map[string]interface{}{"_id": driver.ID}).Decode(&currentDriver)
-		if findErr != nil {
-			d.logger.Error().Err(findErr).
-				Str("short_id", order.ShortID).
-				Str("driver_id", driver.ID.Hex()).
-				Msg("FCM發送前查詢司機狀態失敗")
-			if driverNotificationRelease != nil {
-				driverNotificationRelease()
-			}
-			continue
-		}
-
-		if currentDriver.Status != model.DriverStatusIdle {
-			d.logger.Info().
-				Str("short_id", order.ShortID).
-				Str("driver_id", driver.ID.Hex()).
-				Str("driver_name", driver.Name).
-				Str("car_plate", driver.CarPlate).
-				Str("current_status", string(currentDriver.Status)).
-				Msg("🛡️ FCM發送前檢查：司機已非閒置狀態，跳過發送通知")
-			if driverNotificationRelease != nil {
-				driverNotificationRelease()
-			}
-			continue
-		}
-
-		// 額外檢查：司機是否有CurrentOrderId (MongoDB)
-		if currentDriver.CurrentOrderId != nil && *currentDriver.CurrentOrderId != "" {
-			d.logger.Info().
-				Str("short_id", order.ShortID).
-				Str("driver_id", driver.ID.Hex()).
-				Str("driver_name", driver.Name).
-				Str("car_plate", driver.CarPlate).
-				Str("current_order_id", *currentDriver.CurrentOrderId).
-				Msg("🛡️ FCM發送前檢查：司機已有當前訂單，跳過發送通知")
-			if driverNotificationRelease != nil {
-				driverNotificationRelease()
-			}
-			continue
-		}
+		// 原子性檢查已確保司機和訂單狀態正確，直接發送 FCM
 
 		// 同步發送FCM推送，確保時間準確
 		fcmSendErr := d.FcmSvc.Send(fcmCtx, driver.FcmToken, pushDataMap, notification)
@@ -1077,26 +1040,8 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 			)
 			// 推送成功後立即記錄準確的發送時間到 Redis
 			if d.EventManager != nil {
-				// Redis存儲前最後一次檢查司機狀態，防止已接單司機出現在前端通知列表
-				var finalCheckDriver model.DriverInfo
-				finalCheckErr := d.MongoDB.GetCollection("drivers").FindOne(fcmCtx, map[string]interface{}{"_id": driver.ID}).Decode(&finalCheckDriver)
-				if finalCheckErr != nil {
-					d.logger.Error().Err(finalCheckErr).
-						Str("short_id", order.ShortID).
-						Str("driver_id", driver.ID.Hex()).
-						Msg("Redis存儲前查詢司機狀態失敗")
-				} else if finalCheckDriver.Status != model.DriverStatusIdle || (finalCheckDriver.CurrentOrderId != nil && *finalCheckDriver.CurrentOrderId != "") {
-					d.logger.Info().
-						Str("short_id", order.ShortID).
-						Str("driver_id", driver.ID.Hex()).
-						Str("driver_name", driver.Name).
-						Str("car_plate", driver.CarPlate).
-						Str("current_status", string(finalCheckDriver.Status)).
-						Msg("🛡️ Redis存儲前檢查：司機已非閒置狀態或有當前訂單，跳過存儲到Redis")
-				} else {
-					pushTime := time.Now() // FCM發送成功的當下時間
-					d.recordNotifyingOrder(fcmCtx, order, driver, &orderInfoForDriver, pushTime, int(sequentialCallTimeout.Seconds()))
-				}
+				pushTime := time.Now() // FCM發送成功的當下時間
+				d.recordNotifyingOrder(fcmCtx, order, driver, &orderInfoForDriver, pushTime, int(sequentialCallTimeout.Seconds()))
 			}
 		}
 

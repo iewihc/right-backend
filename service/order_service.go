@@ -11,6 +11,7 @@ import (
 	"right-backend/model"
 	"right-backend/service/interfaces"
 	"right-backend/utils"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2672,4 +2673,112 @@ func (s *OrderService) UpdateOrderEstimatedData(ctx context.Context, orderID str
 		Msg("✅ 成功更新訂單預估數據")
 
 	return nil
+}
+
+// GetFailedOrders 獲取流單列表，支援按司機位置排序
+func (s *OrderService) GetFailedOrders(ctx context.Context, driver *model.DriverInfo, limit int) ([]*orderModels.FailedOrderWithDistance, int, error) {
+	collection := s.mongoDB.GetCollection("orders")
+
+	// 構建過濾條件：狀態為流單且類型不是預約單
+	filter := bson.M{
+		"status": model.OrderStatusFailed,
+		"type":   bson.M{"$ne": model.OrderTypeScheduled}, // 不等於預約單
+	}
+
+	// 查詢總數
+	total, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("統計流單總數失敗")
+		return nil, 0, fmt.Errorf("統計流單總數失敗: %w", err)
+	}
+
+	// 查詢訂單
+	var orders []*model.Order
+	cursor, err := collection.Find(ctx, filter, options.Find().SetSort(bson.D{{"created_at", -1}}))
+	if err != nil {
+		s.logger.Error().Err(err).Msg("查詢流單失敗")
+		return nil, 0, fmt.Errorf("查詢流單失敗: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	if err = cursor.All(ctx, &orders); err != nil {
+		s.logger.Error().Err(err).Msg("解析流單數據失敗")
+		return nil, 0, fmt.Errorf("解析流單數據失敗: %w", err)
+	}
+
+	// 轉換為帶距離信息的結構
+	result := make([]*orderModels.FailedOrderWithDistance, 0, len(orders))
+
+	// 解析司機的經緯度
+	var driverLat, driverLng float64
+	var hasDriverLocation bool
+	if driver != nil && driver.Lat != "" && driver.Lng != "" {
+		if lat, err1 := strconv.ParseFloat(driver.Lat, 64); err1 == nil {
+			if lng, err2 := strconv.ParseFloat(driver.Lng, 64); err2 == nil {
+				driverLat, driverLng = lat, lng
+				hasDriverLocation = true
+			}
+		}
+	}
+
+	for _, order := range orders {
+		failedOrder := &orderModels.FailedOrderWithDistance{
+			Order: order,
+		}
+
+		// 如果有司機位置，計算距離
+		if hasDriverLocation && order.Customer.PickupLat != nil && order.Customer.PickupLng != nil {
+			// 解析訂單的經緯度
+			pickupLat, err1 := strconv.ParseFloat(*order.Customer.PickupLat, 64)
+			pickupLng, err2 := strconv.ParseFloat(*order.Customer.PickupLng, 64)
+
+			if err1 == nil && err2 == nil {
+				// 使用 Haversine 公式計算直線距離
+				distance := utils.Haversine(driverLat, driverLng, pickupLat, pickupLng)
+				failedOrder.Distance = &distance
+			}
+		}
+
+		result = append(result, failedOrder)
+	}
+
+	// 如果有司機位置，按距離排序
+	if hasDriverLocation {
+		// 使用自定義排序：有距離的在前，按距離由近到遠
+		for i := 0; i < len(result)-1; i++ {
+			for j := i + 1; j < len(result); j++ {
+				// 如果 i 沒有距離但 j 有距離，交換
+				if result[i].Distance == nil && result[j].Distance != nil {
+					result[i], result[j] = result[j], result[i]
+				} else if result[i].Distance != nil && result[j].Distance != nil {
+					// 兩者都有距離，按距離排序
+					if *result[i].Distance > *result[j].Distance {
+						result[i], result[j] = result[j], result[i]
+					}
+				}
+			}
+		}
+	}
+
+	// 限制返回數量
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+
+	s.logger.Info().
+		Int("total", int(total)).
+		Int("returned", len(result)).
+		Bool("has_driver_location", hasDriverLocation).
+		Interface("driver_info", map[string]interface{}{
+			"driver_id": func() string {
+				if driver != nil {
+					return driver.ID.Hex()
+				}
+				return ""
+			}(),
+			"has_location": hasDriverLocation,
+		}).
+		Msg("成功獲取流單列表")
+
+	return result, int(total), nil
 }

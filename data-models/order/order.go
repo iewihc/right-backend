@@ -151,6 +151,25 @@ type GetScheduleOrderCountResponse struct {
 	Body common.APIResponse[GetScheduleOrderCountData] `json:"body"`
 }
 
+// GetFailedOrdersInput 獲取流單的輸入參數（司機版本）
+type GetFailedOrdersInput struct {
+	Limit int `query:"limit" default:"50" doc:"返回的訂單數量限制，默認50"`
+}
+
+// FailedOrderWithDistance 帶距離信息的流單
+type FailedOrderWithDistance struct {
+	*model.Order
+	Distance *float64 `json:"distance,omitempty" doc:"與司機的距離（公里），如果未提供司機位置則為空"`
+}
+
+// GetFailedOrdersResponse 獲取流單的回應
+type GetFailedOrdersResponse struct {
+	Body struct {
+		Data  []*FailedOrderWithDistance `json:"data" doc:"流單列表"`
+		Total int                        `json:"total" doc:"符合條件的總訂單數"`
+	} `json:"body"`
+}
+
 // CurrentOrderWithDriverStatusResponse 當前訂單與司機狀態回應
 type CurrentOrderWithDriverStatusResponse struct {
 	Body struct {
