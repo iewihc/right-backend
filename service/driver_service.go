@@ -832,6 +832,17 @@ func (s *DriverService) AcceptOrder(ctx context.Context, driver *model.DriverInf
 			Msg("司機CurrentOrderId已更新")
 	}
 
+	// 步驟5.6: 同步更新 Redis driver_state 的 current_order_id，防止其他訂單派給已接單的司機
+	if s.eventManager != nil {
+		if err := s.eventManager.UpdateDriverStateAfterAccept(ctx, driver.ID.Hex(), orderID); err != nil {
+			s.logger.Error().Err(err).
+				Str("driver_id", driver.ID.Hex()).
+				Str("order_id", orderID).
+				Msg("更新 Redis driver_state 失敗")
+			// 不影響主流程，繼續執行
+		}
+	}
+
 	// 步驟6: 同步發布 Redis 事件（在狀態更新之後，確保dispatcher看到正確狀態）
 	if s.eventManager != nil {
 		acceptResponse := &infra.DriverResponse{
@@ -1297,6 +1308,17 @@ func (s *DriverService) CompleteOrder(ctx context.Context, driver *model.DriverI
 				Str("order_id", orderID).
 				Str("driver_id", driver.ID.Hex()).
 				Msg("司機CurrentOrderId已清除")
+		}
+	}
+
+	// 步驟3.3: 同步清除 Redis driver_state 的 current_order_id，讓司機可以接新單
+	if s.eventManager != nil {
+		if err := s.eventManager.ClearDriverStateAfterComplete(ctx, driver.ID.Hex()); err != nil {
+			s.logger.Error().Err(err).
+				Str("driver_id", driver.ID.Hex()).
+				Str("order_id", orderID).
+				Msg("清除 Redis driver_state 失敗")
+			// 不影響主流程，繼續執行
 		}
 	}
 
@@ -2274,6 +2296,19 @@ func (s *DriverService) ResetDriverWithScheduleClear(ctx context.Context, driver
 		Bool("new_has_schedule", false).
 		Str("operator", operatorName).
 		Msg("成功重置司機狀態並清除預約單資訊")
+
+	// 同步清除 Redis driver_state
+	if s.eventManager != nil {
+		if clearErr := s.eventManager.ClearDriverStateAfterComplete(ctx, driver.ID.Hex()); clearErr != nil {
+			s.logger.Error().Err(clearErr).
+				Str("driver_id", driver.ID.Hex()).
+				Msg("清除 Redis driver_state 失敗 (管理員重置)")
+		} else {
+			s.logger.Info().
+				Str("driver_id", driver.ID.Hex()).
+				Msg("✅ Redis driver_state 已清除 (管理員重置)")
+		}
+	}
 
 	// 發布狀態變更事件（如果有 Redis 事件管理器）
 	if s.eventManager != nil {

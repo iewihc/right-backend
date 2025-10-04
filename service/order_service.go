@@ -1167,6 +1167,21 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID string, cancelRe
 						Msg("已清除司機CurrentOrderId")
 				}
 			}
+
+			// 同步清除 Redis driver_state，讓司機可以接新單
+			if s.eventManager != nil {
+				if clearErr := s.eventManager.ClearDriverStateAfterComplete(context.Background(), driverID); clearErr != nil {
+					s.logger.Error().Err(clearErr).
+						Str("driver_id", driverID).
+						Str("order_id", orderID).
+						Msg("清除 Redis driver_state 失敗 (訂單取消)")
+				} else {
+					s.logger.Info().
+						Str("driver_id", driverID).
+						Str("order_id", orderID).
+						Msg("✅ Redis driver_state 已清除 (訂單取消)")
+				}
+			}
 		}
 
 		// 發送 FCM 取消通知給司機

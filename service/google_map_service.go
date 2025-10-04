@@ -342,6 +342,7 @@ func (s *GoogleMapService) FindPlaceFromText(ctx context.Context, input string, 
 		"fields":    "place_id,name,formatted_address,geometry,rating",
 		"language":  "zh-TW",
 		"region":    "tw",
+		"locationbias": "circle:25000@24.1477,120.6736", // 台中市中心半徑 25 公里範圍
 	}
 
 	apiURL := s.GoogleClient.BuildURL("https://maps.googleapis.com/maps/api/place/findplacefromtext/json", params)

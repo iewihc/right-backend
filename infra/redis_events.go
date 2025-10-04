@@ -909,3 +909,66 @@ func (rem *RedisEventManager) StartCleanupWatcher(ctx context.Context) {
 		}
 	}
 }
+
+// UpdateDriverStateAfterAccept 更新 Redis driver_state 在司機接單後
+// 確保 driver_state 與 MongoDB 狀態同步，防止重複派單
+func (rem *RedisEventManager) UpdateDriverStateAfterAccept(ctx context.Context, driverID, orderID string) error {
+	driverStateKey := fmt.Sprintf("driver_state:%s", driverID)
+	script := `
+		redis.call("HSET", KEYS[1],
+			"status", "busy",
+			"current_order_id", ARGV[1],
+			"order_accepted_at", ARGV[2]
+		)
+		redis.call("EXPIRE", KEYS[1], 86400)
+		return 1
+	`
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+
+	_, err := rem.client.Eval(ctx, script, []string{driverStateKey}, orderID, timestamp).Result()
+	if err != nil {
+		rem.logger.Error().Err(err).
+			Str("driver_id", driverID).
+			Str("order_id", orderID).
+			Msg("更新 Redis driver_state 失敗")
+		return err
+	}
+
+	rem.logger.Info().
+		Str("driver_id", driverID).
+		Str("order_id", orderID).
+		Msg("✅ Redis driver_state 已更新 (接單後同步)")
+
+	return nil
+}
+
+// ClearDriverStateAfterComplete 清除 Redis driver_state 在訂單完成後
+// 確保 driver_state 與 MongoDB 狀態同步，讓司機可以接新單
+func (rem *RedisEventManager) ClearDriverStateAfterComplete(ctx context.Context, driverID string) error {
+	driverStateKey := fmt.Sprintf("driver_state:%s", driverID)
+	script := `
+		redis.call("HSET", KEYS[1],
+			"status", "idle",
+			"current_order_id", "",
+			"order_completed_at", ARGV[1]
+		)
+		redis.call("HDEL", KEYS[1], "order_accepted_at")
+		redis.call("EXPIRE", KEYS[1], 86400)
+		return 1
+	`
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+
+	_, err := rem.client.Eval(ctx, script, []string{driverStateKey}, timestamp).Result()
+	if err != nil {
+		rem.logger.Error().Err(err).
+			Str("driver_id", driverID).
+			Msg("清除 Redis driver_state 失敗")
+		return err
+	}
+
+	rem.logger.Info().
+		Str("driver_id", driverID).
+		Msg("✅ Redis driver_state 已清除 (訂單完成後同步)")
+
+	return nil
+}
