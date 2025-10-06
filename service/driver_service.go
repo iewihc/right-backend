@@ -1240,8 +1240,34 @@ func (s *DriverService) RejectOrder(ctx context.Context, driver *model.DriverInf
 	if o.Rounds != nil {
 		currentRounds = *o.Rounds
 	}
+
+	// 從 Redis 獲取預估時間和距離資訊
+	var distanceKm float64
+	var estPickupMins int
+	cacheKey := fmt.Sprintf("dispatch:notifying:%s", driver.ID.Hex())
+	if cachedData, redisErr := s.eventManager.GetCache(ctx, cacheKey); redisErr == nil {
+		var redisNotifyingOrder struct {
+			OrderID   string `json:"order_id"`
+			OrderData struct {
+				EstPickUpDist float64 `json:"est_pick_up_dist"`
+				EstPickupMins int     `json:"est_pickup_mins"`
+			} `json:"order_data"`
+		}
+		if unmarshalErr := json.Unmarshal([]byte(cachedData), &redisNotifyingOrder); unmarshalErr == nil {
+			if redisNotifyingOrder.OrderID == orderID {
+				distanceKm = redisNotifyingOrder.OrderData.EstPickUpDist
+				estPickupMins = redisNotifyingOrder.OrderData.EstPickupMins
+			}
+		}
+	}
+
+	details := "司機拒絕接單"
+	if estPickupMins > 0 || distanceKm > 0 {
+		details = fmt.Sprintf("司機拒絕接單 (預估: %d分鐘, %.1f公里)", estPickupMins, distanceKm)
+	}
+
 	if err := s.orderService.AddOrderLog(ctx, orderID, model.OrderLogActionDriverReject,
-		string(driver.Fleet), driver.Name, driver.CarPlate, driver.ID.Hex(), "司機拒絕接單", currentRounds); err != nil {
+		string(driver.Fleet), driver.Name, driver.CarPlate, driver.ID.Hex(), details, currentRounds); err != nil {
 		s.logger.Error().Err(err).Msg("新增拒單記錄失敗")
 	}
 

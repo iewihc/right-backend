@@ -443,8 +443,8 @@ func (s *LineService) CreateOrderFromMessage(ctx context.Context, message, confi
 		return nil, fmt.Errorf("orderService not initialized")
 	}
 
-	// 使用 SimpleCreateOrder 處理用戶輸入
-	result, err := s.orderService.SimpleCreateOrder(ctx, message, "", model.CreatedByLine)
+	// 使用 SimpleCreateOrder 處理用戶輸入（使用 sourceID 作為建立者名稱）
+	result, err := s.orderService.SimpleCreateOrder(ctx, message, "", model.CreatedByLine, sourceID)
 	if err != nil {
 		s.logger.Error().
 			Err(err).

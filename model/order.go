@@ -72,6 +72,7 @@ type Order struct {
 	IsErrand             bool                `json:"is_errand,omitempty" bson:"is_errand,omitempty" doc:"是否為跑腿"`
 	IsScheduled          bool                `json:"is_scheduled,omitempty" bson:"is_scheduled,omitempty" doc:"是否為預約單"`
 	CreatedBy            string              `json:"created_by,omitempty" bson:"created_by,omitempty" doc:"建立者姓名"`
+	CreatedType          string              `json:"created_type,omitempty" bson:"created_type,omitempty" doc:"建立者類型(discord/line/system)"`
 	CreatedAt            *time.Time          `json:"created_at,omitempty" bson:"created_at,omitempty" doc:"建立時間"`
 	UpdatedAt            *time.Time          `json:"updated_at,omitempty" bson:"updated_at,omitempty" doc:"更新時間"`
 	AcceptanceTime       *time.Time          `json:"acceptance_time,omitempty" bson:"acceptance_time,omitempty" doc:"接單時間"`

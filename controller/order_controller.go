@@ -186,7 +186,7 @@ func (c *OrderController) RegisterRoutes(api huma.API) {
 		}
 
 		// 使用 SimpleCreateOrder 方法
-		result, err := c.orderService.SimpleCreateOrder(ctx, input.Body.OriText, input.Body.Fleet, model.CreatedBy(userFromToken.Name))
+		result, err := c.orderService.SimpleCreateOrder(ctx, input.Body.OriText, input.Body.Fleet, model.CreatedBySystem, userFromToken.Name)
 		if err != nil {
 			// 檢查是否為地址建議錯誤
 			if suggestionErr, ok := err.(*order.AddressSuggestionError); ok {

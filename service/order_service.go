@@ -354,7 +354,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, order *model.Order) (*mo
 }
 
 // SimpleCreateOrder 使用文字輸入創建訂單並返回詳細結果
-func (s *OrderService) SimpleCreateOrder(ctx context.Context, orderText string, fleet string, createdBy model.CreatedBy) (*model.CreateOrderResult, error) {
+func (s *OrderService) SimpleCreateOrder(ctx context.Context, orderText string, fleet string, createdBy model.CreatedBy, createdByName ...string) (*model.CreateOrderResult, error) {
 	startTime := time.Now()
 	source := metrics.DetermineSourceFromCreatedBy(string(createdBy))
 	status := metrics.StatusSuccess
@@ -381,11 +381,18 @@ func (s *OrderService) SimpleCreateOrder(ctx context.Context, orderText string, 
 		return nil, fmt.Errorf("無效格式：期望 'CustomerGroup / Details' (Invalid format: expected 'CustomerGroup / Details')")
 	}
 
+	// 設置建立者名稱，如果提供了 createdByName 參數則使用，否則使用類型作為默認值
+	createdByUserName := string(createdBy)
+	if len(createdByName) > 0 && createdByName[0] != "" {
+		createdByUserName = createdByName[0]
+	}
+
 	order := &model.Order{
 		OriText:        orderText,                     // 保存原始輸入文字
 		OriTextDisplay: customerGroup + "/" + address, // 保存客群/地址部分，不含hint內容
 		Hints:          remarks,                       // hints 統一設為空白
-		CreatedBy:      string(createdBy),             // 設置建立者姓名
+		CreatedBy:      createdByUserName,             // 設置建立者姓名
+		CreatedType:    string(createdBy),             // 設置建立者類型
 		IsErrand:       isErrand,                      // 設置跑腿標記
 	}
 
@@ -2238,23 +2245,15 @@ func (s *OrderService) sendFCMCancellationNotification(ctx context.Context, orde
 		"message":           message,
 	}
 
-	// 根據取消原因決定通知內容
+	// 統一通知內容：訂單已被乘客取消
 	var bodyMessage string
 	var orderType = "訂單"
 	if order.IsScheduled {
 		orderType = "預約訂單"
 	}
 
-	switch {
-	case strings.Contains(cancelReason, "網頁"):
-		bodyMessage = fmt.Sprintf("%s %s 已被網頁用戶 %s 取消", orderType, order.OriTextDisplay, cancelledBy)
-	case strings.Contains(cancelReason, "LINE"):
-		bodyMessage = fmt.Sprintf("%s %s 已被 LINE 用戶取消", orderType, order.OriTextDisplay)
-	case strings.Contains(cancelReason, "Discord"):
-		bodyMessage = fmt.Sprintf("%s %s 已被 Discord 用戶 %s 取消", orderType, order.OriTextDisplay, cancelledBy)
-	default:
-		bodyMessage = fmt.Sprintf("%s %s 已被 %s 取消", orderType, order.OriTextDisplay, cancelledBy)
-	}
+	// 一律顯示為「乘客取消」
+	bodyMessage = fmt.Sprintf("%s %s 已被乘客取消", orderType, order.OriTextDisplay)
 
 	// 決定通知標題
 	var title string

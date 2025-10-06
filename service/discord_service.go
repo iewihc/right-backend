@@ -1835,6 +1835,10 @@ func (s *DiscordService) Close() {
 func (s *DiscordService) parseOrderIDFromFooter(message *discordgo.Message) (string, error) {
 	// 檢查消息是否有embed
 	if len(message.Embeds) == 0 {
+		s.logger.Debug().
+			Str("message_id", message.ID).
+			Str("author", message.Author.Username).
+			Msg("消息沒有embed")
 		return "", fmt.Errorf("消息沒有embed")
 	}
 
@@ -1844,20 +1848,45 @@ func (s *DiscordService) parseOrderIDFromFooter(message *discordgo.Message) (str
 	if embed.Footer != nil && embed.Footer.Text != "" {
 		footerText := embed.Footer.Text
 
-		// 直接orderID格式（新的簡潔格式）
-		if len(footerText) == 24 && strings.Contains(footerText, "c") {
-			s.logger.Debug().
+		s.logger.Debug().
+			Str("message_id", message.ID).
+			Str("footer_text", footerText).
+			Int("footer_length", len(footerText)).
+			Msg("檢查 footer 內容")
+
+		// 直接orderID格式（新的簡潔格式）- MongoDB ObjectID 是 24 字元的十六進制字串
+		if len(footerText) == 24 {
+			s.logger.Info().
 				Str("footer_text", footerText).
 				Str("parsed_order_id", footerText).
-				Msg("從footer解析OrderID成功")
+				Msg("從footer解析OrderID成功（24字元格式）")
 			return footerText, nil
+		}
+
+		// shortID 格式（訂單卡片）- 例如 #39fa 或 WEI#39fa
+		if strings.Contains(footerText, "#") {
+			s.logger.Info().
+				Str("footer_text", footerText).
+				Msg("檢測到 shortID 格式，嘗試從資料庫查詢")
+			// 需要從資料庫查詢 shortID 對應的訂單
+			order, err := s.orderService.GetOrderByShortID(context.Background(), footerText)
+			if err == nil && order != nil {
+				s.logger.Info().
+					Str("footer_text", footerText).
+					Str("parsed_order_id", order.ID.Hex()).
+					Msg("從footer的shortID解析OrderID成功")
+				return order.ID.Hex(), nil
+			}
+			s.logger.Warn().Err(err).
+				Str("footer_text", footerText).
+				Msg("無法從shortID查詢到訂單")
 		}
 
 		// emoji格式：🔗 orderID（向後兼容）
 		if strings.HasPrefix(footerText, "🔗 ") {
 			orderID := strings.TrimPrefix(footerText, "🔗 ")
-			if orderID != "" {
-				s.logger.Debug().
+			if orderID != "" && len(orderID) == 24 {
+				s.logger.Info().
 					Str("footer_text", footerText).
 					Str("parsed_order_id", orderID).
 					Msg("從footer解析OrderID成功（emoji格式）")
@@ -1868,14 +1897,24 @@ func (s *DiscordService) parseOrderIDFromFooter(message *discordgo.Message) (str
 		// 舊格式：Order: orderID（向後兼容）
 		if strings.HasPrefix(footerText, "Order: ") {
 			orderID := strings.TrimPrefix(footerText, "Order: ")
-			if orderID != "" {
-				s.logger.Debug().
+			if orderID != "" && len(orderID) == 24 {
+				s.logger.Info().
 					Str("footer_text", footerText).
 					Str("parsed_order_id", orderID).
 					Msg("從footer解析OrderID成功（舊格式）")
 				return orderID, nil
 			}
 		}
+
+		s.logger.Warn().
+			Str("footer_text", footerText).
+			Int("footer_length", len(footerText)).
+			Msg("footer 格式不符合任何已知格式")
+	} else {
+		s.logger.Debug().
+			Str("message_id", message.ID).
+			Bool("has_footer", embed.Footer != nil).
+			Msg("embed 沒有 footer 或 footer 為空")
 	}
 
 	return "", fmt.Errorf("無法從embed footer解析OrderID")
@@ -2133,7 +2172,7 @@ func (s *DiscordService) messageCreate(sess *discordgo.Session, m *discordgo.Mes
 	}
 
 	// 2. 直接使用 SimpleCreateOrder 來處理用戶輸入
-	result, err := s.orderService.SimpleCreateOrder(context.Background(), m.Content, "", model.CreatedByDiscord)
+	result, err := s.orderService.SimpleCreateOrder(context.Background(), m.Content, "", model.CreatedByDiscord, m.Author.Username)
 	if err != nil {
 		s.logger.Error().
 			Err(err).
@@ -2539,7 +2578,7 @@ func (s *DiscordService) processWeiCreateExampleOrder(ctx context.Context, i *di
 	}
 
 	// 2. 建立訂單
-	result, err := s.orderService.SimpleCreateOrder(ctx, content, "", model.CreatedByDiscord)
+	result, err := s.orderService.SimpleCreateOrder(ctx, content, "", model.CreatedByDiscord, userName)
 	if err != nil {
 		s.logger.Error().Err(err).
 			Str("content", content).

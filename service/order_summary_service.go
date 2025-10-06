@@ -43,8 +43,10 @@ type OrderSummaryFilter struct {
 func (s *OrderSummaryService) GetOrderSummary(ctx context.Context, pageNum, pageSize int, filter *OrderSummaryFilter, sortField, sortOrder string) ([]*orderModels.OrderSummaryItem, int64, error) {
 	collection := s.mongoDB.GetCollection("orders")
 
-	// 基本過濾條件
-	matchFilter := bson.M{}
+	// 基本過濾條件：排除流單狀態
+	matchFilter := bson.M{
+		"status": bson.M{"$ne": model.OrderStatusFailed},
+	}
 
 	// 應用過濾器
 	if filter != nil {
@@ -78,9 +80,19 @@ func (s *OrderSummaryService) GetOrderSummary(ctx context.Context, pageNum, page
 			matchFilter["customer_group"] = bson.M{"$regex": filter.CustomerGroup, "$options": "i"}
 		}
 
-		// 狀態過濾
+		// 狀態過濾（排除流單狀態）
 		if len(filter.Status) > 0 {
-			matchFilter["status"] = bson.M{"$in": filter.Status}
+			// 過濾掉「流單」狀態
+			filteredStatuses := []string{}
+			for _, status := range filter.Status {
+				if status != string(model.OrderStatusFailed) && status != "流單" {
+					filteredStatuses = append(filteredStatuses, status)
+				}
+			}
+			// 只有在有有效狀態時才添加過濾條件
+			if len(filteredStatuses) > 0 {
+				matchFilter["status"] = bson.M{"$in": filteredStatuses}
+			}
 		}
 
 		// 上車地點過濾
