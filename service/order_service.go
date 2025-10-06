@@ -1104,7 +1104,8 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID string, cancelRe
 	}
 
 	// 3. 同步更新訂單狀態為已取消並通知 dispatcher
-	logReason := fmt.Sprintf("%s by %s", cancelReason, cancelledBy)
+	// 統一記錄為「乘客取消」
+	logReason := "乘客取消"
 	if err := s.UpdateOrderStatusWithEvent(ctx, orderID, model.OrderStatusCancelled, logReason, "", nil); err != nil {
 		s.logger.Error().Err(err).Str("order_id", orderID).Msg("更新訂單狀態為取消失敗")
 		return nil, fmt.Errorf("更新訂單狀態失敗: %w", err)
@@ -1126,9 +1127,9 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID string, cancelRe
 				Msg("異步記錄取消訂單日誌失敗")
 		}
 
-		// 記錄取消訂單到 Redis 供司機查詢
+		// 記錄取消訂單到 Redis 供司機查詢（2分鐘 TTL）
 		if updatedOrder.Driver.AssignedDriver != "" {
-			if err := s.RecordCancelingOrder(context.Background(), updatedOrder, logReason, 30); err != nil {
+			if err := s.RecordCancelingOrder(context.Background(), updatedOrder, logReason, 120); err != nil {
 				s.logger.Error().Err(err).
 					Str("order_id", orderID).
 					Str("driver_id", updatedOrder.Driver.AssignedDriver).

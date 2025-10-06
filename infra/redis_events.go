@@ -410,6 +410,11 @@ func (rem *RedisEventManager) GetCache(ctx context.Context, key string) (string,
 	return rem.client.Get(ctx, key).Result()
 }
 
+// DeleteCache 刪除 Redis 快取
+func (rem *RedisEventManager) DeleteCache(ctx context.Context, key string) error {
+	return rem.client.Del(ctx, key).Err()
+}
+
 // DiscordEventType Discord 事件類型
 type DiscordEventType string
 
