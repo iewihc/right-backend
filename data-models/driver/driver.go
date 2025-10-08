@@ -59,7 +59,7 @@ type AcceptOrderInput struct {
 	} `json:"body"`
 }
 
-type RejectOrderInput struct {」
+type RejectOrderInput struct {
 	Body struct {
 		OrderID string `json:"order_id" doc:"訂單ID" example:"664a73ad0e3a583c37e4b30d"`
 	} `json:"body"`
