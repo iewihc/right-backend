@@ -183,6 +183,22 @@ func (s *OrderSummaryService) GetOrderSummary(ctx context.Context, pageNum, page
 				if err == nil {
 					item.Driver.JkoAccount = driverInfo.JkoAccount
 					item.Driver.CarColor = driverInfo.CarColor
+
+					// 組合車牌和顏色
+					carPlate := driverInfo.CarPlate
+					if carPlate == "" {
+						carPlate = "未知車牌"
+					}
+					if driverInfo.CarColor != "" {
+						carPlate = carPlate + " (" + driverInfo.CarColor + ")"
+					}
+
+					driverName := driverInfo.Name
+					if driverName == "" {
+						driverName = "未知司機"
+					}
+
+					item.DriverInfo = carPlate + " | " + driverName
 				}
 			}
 		}

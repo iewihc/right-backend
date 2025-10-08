@@ -1842,19 +1842,6 @@ func (s *DriverService) CheckNotifyingOrder(ctx context.Context, driverID string
 		Int("remaining_seconds", remainingSeconds).
 		Msgf("找到通知中訂單: %s", redisNotifyingOrder.OrderData.OriText)
 
-	// ACK 機制：司機已收到派單通知，立即從 Redis 移除此記錄
-	if delErr := s.eventManager.DeleteCache(ctx, notifyingOrderKey); delErr != nil {
-		s.logger.Error().Err(delErr).
-			Str("driver_id", driverID).
-			Str("order_id", redisNotifyingOrder.OrderID).
-			Msg("刪除通知中訂單 Redis 記錄失敗")
-	} else {
-		s.logger.Info().
-			Str("driver_id", driverID).
-			Str("order_id", redisNotifyingOrder.OrderID).
-			Msg("✅ 司機已確認派單通知，Redis 記錄已刪除")
-	}
-
 	return &driverModels.CheckNotifyingOrderData{
 		HasNotifyingOrder: true,
 		NotifyingOrder:    notifyingOrder,

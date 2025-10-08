@@ -53,6 +53,12 @@ func (s *DashboardService) GetDashboardStats(ctx context.Context) (*dashboard.Da
 	}
 	stats.OnlineDrivers = *onlineDriverStats
 
+	offlineDriverStats, err := s.getOfflineDriverStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.OfflineDrivers = *offlineDriverStats
+
 	idleDriverStats, err := s.getIdleDriverStats(ctx)
 	if err != nil {
 		return nil, err
@@ -226,6 +232,22 @@ func (s *DashboardService) getIdleDriverStats(ctx context.Context) (*dashboard.D
 	}, nil
 }
 
+func (s *DashboardService) getOfflineDriverStats(ctx context.Context) (*dashboard.DriverStats, error) {
+	collection := s.mongoDB.GetCollection("drivers")
+
+	offlineDrivers, err := collection.CountDocuments(ctx, bson.M{
+		"is_active": true,
+		"is_online": false,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &dashboard.DriverStats{
+		Count: int(offlineDrivers),
+	}, nil
+}
+
 func (s *DashboardService) getPickingUpDriversCount(ctx context.Context) (int, error) {
 	collection := s.mongoDB.GetCollection("drivers")
 
@@ -285,7 +307,7 @@ func (s *DashboardService) GetAllDrivers(ctx context.Context) ([]model.DriverInf
 	return drivers, int(totalCount), nil
 }
 
-func (s *DashboardService) GetDriverOrders(ctx context.Context, pageNum, pageSize int, driverStatus, searchKeyword string) ([]dashboard.DashboardItem, common.PaginationInfo, error) {
+func (s *DashboardService) GetDriverOrders(ctx context.Context, pageNum, pageSize int, driverStatus, searchKeyword string) ([]dashboard.DriverOrderItem, common.PaginationInfo, error) {
 	// 設定默認分頁參數
 	if pageNum <= 0 {
 		pageNum = 1
@@ -294,26 +316,103 @@ func (s *DashboardService) GetDriverOrders(ctx context.Context, pageNum, pageSiz
 		pageSize = 10
 	}
 
-	var allItems []dashboard.DashboardItem
+	driversCollection := s.mongoDB.GetCollection("drivers")
+	ordersCollection := s.mongoDB.GetCollection("orders")
 
-	// 1. 獲取訂單項目
-	orderItems, err := s.getOrderItems(ctx, driverStatus, searchKeyword)
+	// 1. 構建司機過濾條件
+	driverFilter := bson.M{
+		"is_active": true,
+		"is_online": true,
+	}
+
+	// 根據司機狀態過濾
+	if driverStatus != "" && driverStatus != "all" {
+		driverFilter["status"] = driverStatus
+	}
+
+	// 司機資訊搜尋（車牌、名稱、編號、帳號）
+	if searchKeyword != "" && strings.TrimSpace(searchKeyword) != "" {
+		keyword := strings.TrimSpace(searchKeyword)
+		regex := primitive.Regex{Pattern: keyword, Options: "i"}
+		driverFilter["$or"] = []bson.M{
+			{"name": regex},
+			{"car_plate": regex},
+			{"driver_no": regex},
+			{"account": regex},
+		}
+	}
+
+	// 2. 載入所有符合條件的線上司機
+	driverCursor, err := driversCollection.Find(ctx, driverFilter, options.Find().SetSort(bson.M{"updated_at": -1}))
 	if err != nil {
-		s.logger.Error().Err(err).Msg("取得訂單項目失敗 (Failed to get order items)")
 		return nil, common.PaginationInfo{}, err
 	}
-	s.logger.Debug().Int("count", len(orderItems)).Msg("找到訂單項目 (Found order items)")
-	allItems = append(allItems, orderItems...)
+	defer driverCursor.Close(ctx)
 
-	// 2. 獲取司機狀態項目
-	driverItems, err := s.getDriverStatusItems(ctx, driverStatus, searchKeyword)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("取得司機項目失敗 (Failed to get driver items)")
+	var allDrivers []model.DriverInfo
+	if err := driverCursor.All(ctx, &allDrivers); err != nil {
 		return nil, common.PaginationInfo{}, err
 	}
-	allItems = append(allItems, driverItems...)
 
-	// 3. 按時間排序（最新的在前面）
+	// 3. 處理每個司機，建立 DriverOrderItem
+	var allItems []dashboard.DriverOrderItem
+
+	for _, driver := range allDrivers {
+		item := dashboard.DriverOrderItem{
+			DriverInfo:   utils.GetDriverInfoWithPlate(&driver),
+			DriverFleet:  string(driver.Fleet),
+			DriverStatus: string(driver.Status),
+		}
+
+		// 處理即時訂單
+		if driver.CurrentOrderId != nil && *driver.CurrentOrderId != "" {
+			orderID, err := primitive.ObjectIDFromHex(*driver.CurrentOrderId)
+			if err == nil {
+				var order model.Order
+				err = ordersCollection.FindOne(ctx, bson.M{"_id": orderID}).Decode(&order)
+				if err == nil {
+					item.OrderID = order.ID.Hex()
+					item.ShortID = order.ShortID
+					item.OrderStatus = string(order.Status)
+					item.PickupAddress = order.Customer.PickupAddress
+					item.OriText = order.OriText
+					item.OriTextDisplay = order.OriTextDisplay
+					item.Hints = order.Hints
+					// 非閒置司機：使用訂單的 created_at
+					if order.CreatedAt != nil {
+						item.Time = order.CreatedAt
+					}
+				}
+			}
+		}
+
+		// 處理預約訂單
+		if driver.CurrentOrderScheduleId != nil && *driver.CurrentOrderScheduleId != "" {
+			scheduleID, err := primitive.ObjectIDFromHex(*driver.CurrentOrderScheduleId)
+			if err == nil {
+				var scheduleOrder model.Order
+				err = ordersCollection.FindOne(ctx, bson.M{"_id": scheduleID}).Decode(&scheduleOrder)
+				if err == nil {
+					item.ScheduleOrderID = scheduleOrder.ID.Hex()
+					item.ScheduleShortID = scheduleOrder.ShortID
+					item.ScheduleOrderStatus = string(scheduleOrder.Status)
+					item.ScheduleOriText = scheduleOrder.OriText
+					item.SchedulePickup = scheduleOrder.Customer.PickupAddress
+					item.ScheduleTime = scheduleOrder.ScheduledAt
+					item.ScheduleHints = scheduleOrder.Hints
+				}
+			}
+		}
+
+		// 閒置司機：使用司機的 updated_at
+		if item.DriverStatus == string(model.DriverStatusIdle) {
+			item.Time = &driver.UpdatedAt
+		}
+
+		allItems = append(allItems, item)
+	}
+
+	// 4. 排序：按 Time 降序排列（最新的在最上面）
 	sort.Slice(allItems, func(i, j int) bool {
 		if allItems[i].Time == nil && allItems[j].Time == nil {
 			return false
@@ -327,13 +426,13 @@ func (s *DashboardService) GetDriverOrders(ctx context.Context, pageNum, pageSiz
 		return allItems[i].Time.After(*allItems[j].Time)
 	})
 
-	// 4. 計算分頁
+	// 5. 計算分頁
 	totalItems := int64(len(allItems))
 	skip := (pageNum - 1) * pageSize
 	end := skip + pageSize
 
 	if skip >= len(allItems) {
-		allItems = []dashboard.DashboardItem{}
+		allItems = []dashboard.DriverOrderItem{}
 	} else if end > len(allItems) {
 		allItems = allItems[skip:]
 	} else {
@@ -345,210 +444,37 @@ func (s *DashboardService) GetDriverOrders(ctx context.Context, pageNum, pageSiz
 	return allItems, pagination, nil
 }
 
-// getOrderItems 獲取訂單項目 - 包含非閒置司機的訂單和等待接單的訂單
-func (s *DashboardService) getOrderItems(ctx context.Context, driverStatus, searchKeyword string) ([]dashboard.DashboardItem, error) {
-	var items []dashboard.DashboardItem
-	ordersCollection := s.mongoDB.GetCollection("orders")
+// filterDriverOrderItems 過濾司機訂單項目（支援司機編號、帳號、名稱、訂單短ID、ori_text 搜尋）
+func (s *DashboardService) filterDriverOrderItems(items []dashboard.DriverOrderItem, keyword string) []dashboard.DriverOrderItem {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	var filtered []dashboard.DriverOrderItem
 
-	// 1. 獲取所有非閒置司機的進行中訂單
-	driversCollection := s.mongoDB.GetCollection("drivers")
-
-	// 構建司機過濾條件
-	andConditions := []bson.M{
-		{"is_online": true},
-		{"is_active": true},
-		{"status": bson.M{"$ne": model.DriverStatusIdle}}, // 排除閒置司機
-	}
-
-	// 根據司機狀態進一步過濾
-	if driverStatus != "" && driverStatus != "all" && driverStatus != "idle" {
-		andConditions = append(andConditions, bson.M{"status": driverStatus})
-	}
-
-	// 司機搜索條件
-	if searchKeyword != "" && strings.TrimSpace(searchKeyword) != "" {
-		keyword := strings.TrimSpace(searchKeyword)
-		regex := primitive.Regex{Pattern: keyword, Options: "i"}
-		andConditions = append(andConditions, bson.M{
-			"$or": []bson.M{
-				{"name": regex},
-				{"car_plate": regex},
-			},
-		})
-	}
-
-	driverFilter := bson.M{"$and": andConditions}
-
-	driverCursor, err := driversCollection.Find(ctx, driverFilter)
-	if err != nil {
-		return nil, err
-	}
-	defer driverCursor.Close(ctx)
-
-	// 為每個非閒置司機找到他們正在進行的訂單
-	for driverCursor.Next(ctx) {
-		var driver model.DriverInfo
-		if err := driverCursor.Decode(&driver); err != nil {
+	for _, item := range items {
+		// 檢查司機資訊（DriverInfo 已包含車牌、名稱、車隊等資訊）
+		if strings.Contains(strings.ToLower(item.DriverInfo), keyword) {
+			filtered = append(filtered, item)
 			continue
 		}
 
-		// 找這個司機正在進行的訂單
-		orderFilter := bson.M{
-			"driver.assigned_driver": driver.Name,
-			"status": bson.M{
-				"$in": []model.OrderStatus{
-					model.OrderStatusEnroute,
-					model.OrderStatusDriverArrived,
-					model.OrderStatusExecuting,
-				},
-			},
-		}
-
-		// 如果有搜索關鍵字，檢查訂單欄位
-		if searchKeyword != "" && strings.TrimSpace(searchKeyword) != "" {
-			keyword := strings.TrimSpace(searchKeyword)
-			regex := primitive.Regex{Pattern: keyword, Options: "i"}
-			orderFilter["$or"] = []bson.M{
-				{"customer.pickup_address": regex},
-				{"customer.input_pickup_address": regex},
-				{"ori_text": regex},
-				{"ori_text_display": regex},
-				{"hints": regex},
-			}
-		}
-
-		var order model.Order
-		err := ordersCollection.FindOne(ctx, orderFilter).Decode(&order)
-		if err == nil {
-			// 找到訂單，加入結果
-			orderTime := order.CreatedAt
-			if order.AcceptanceTime != nil {
-				orderTime = order.AcceptanceTime
+		// 檢查即時訂單資訊（只有在非閒置狀態時才檢查）
+		if item.DriverStatus != string(model.DriverStatusIdle) {
+			if strings.Contains(strings.ToLower(item.ShortID), keyword) ||
+				strings.Contains(strings.ToLower(item.OriText), keyword) ||
+				strings.Contains(strings.ToLower(item.PickupAddress), keyword) {
+				filtered = append(filtered, item)
+				continue
 			}
 
-			shortID := order.ShortID
-
-			item := dashboard.DashboardItem{
-				Type:           "order",
-				Time:           orderTime,
-				OrderID:        order.ID.Hex(),
-				ShortID:        shortID,
-				OrderStatus:    string(order.Status),
-				PickupAddress:  order.Customer.PickupAddress,
-				OriText:        order.OriText,
-				OriTextDisplay: order.OriTextDisplay,
-				Hints:          order.Hints,
-				DriverStatus:   string(driver.Status),
+			// 檢查預約訂單資訊
+			if strings.Contains(strings.ToLower(item.ScheduleShortID), keyword) ||
+				strings.Contains(strings.ToLower(item.ScheduleOriText), keyword) {
+				filtered = append(filtered, item)
+				continue
 			}
-
-			items = append(items, item)
 		}
 	}
 
-	// 2. 加入所有等待接單的訂單（流單）
-	waitingOrderFilter := bson.M{
-		"status": model.OrderStatusWaiting,
-	}
-
-	// 如果有訂單搜索關鍵字
-	if searchKeyword != "" && strings.TrimSpace(searchKeyword) != "" {
-		keyword := strings.TrimSpace(searchKeyword)
-		regex := primitive.Regex{Pattern: keyword, Options: "i"}
-		waitingOrderFilter["$or"] = []bson.M{
-			{"customer.pickup_address": regex},
-			{"customer.input_pickup_address": regex},
-			{"ori_text": regex},
-			{"ori_text_display": regex},
-			{"hints": regex},
-		}
-	}
-
-	waitingCursor, err := ordersCollection.Find(ctx, waitingOrderFilter, options.Find().SetSort(bson.M{"created_at": -1}).SetLimit(100))
-	if err != nil {
-		return items, nil // 即使等待訂單查詢失敗，仍返回已有的結果
-	}
-	defer waitingCursor.Close(ctx)
-
-	// 加入等待接單的訂單
-	for waitingCursor.Next(ctx) {
-		var order model.Order
-		if err := waitingCursor.Decode(&order); err != nil {
-			continue
-		}
-
-		shortID := order.ShortID
-
-		item := dashboard.DashboardItem{
-			Type:           "order",
-			Time:           order.CreatedAt,
-			OrderID:        order.ID.Hex(),
-			ShortID:        shortID,
-			OrderStatus:    string(order.Status),
-			PickupAddress:  order.Customer.PickupAddress,
-			OriText:        order.OriText,
-			OriTextDisplay: order.OriTextDisplay,
-			Hints:          order.Hints,
-			DriverStatus:   "", // 等待接單的訂單沒有司機狀態
-		}
-
-		items = append(items, item)
-	}
-
-	return items, nil
-}
-
-// getDriverStatusItems 獲取司機狀態項目
-func (s *DashboardService) getDriverStatusItems(ctx context.Context, driverStatus, searchKeyword string) ([]dashboard.DashboardItem, error) {
-	driversCollection := s.mongoDB.GetCollection("drivers")
-
-	// 構建基本過濾條件：只獲取在線司機
-	matchFilter := bson.M{
-		"is_online": true,
-		"is_active": true,
-	}
-
-	// 根據司機狀態過濾（外層狀態過濾）
-	if driverStatus != "" && driverStatus != "all" {
-		matchFilter["status"] = driverStatus
-	}
-
-	// 搜索條件
-	if searchKeyword != "" && strings.TrimSpace(searchKeyword) != "" {
-		keyword := strings.TrimSpace(searchKeyword)
-		regex := primitive.Regex{Pattern: keyword, Options: "i"}
-		matchFilter["$or"] = []bson.M{
-			{"name": regex},
-			{"car_plate": regex},
-		}
-	}
-
-	cursor, err := driversCollection.Find(ctx, matchFilter, options.Find().SetSort(bson.M{"updated_at": -1}).SetLimit(1000))
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var items []dashboard.DashboardItem
-	for cursor.Next(ctx) {
-		var driver model.DriverInfo
-		if err := cursor.Decode(&driver); err != nil {
-			continue
-		}
-
-		// 所有符合條件的司機都要顯示（因為外層已經過濾了）
-		driverInfoStr := utils.GetDriverInfo(&driver)
-
-		item := dashboard.DashboardItem{
-			Type:         "driver",
-			Time:         &driver.UpdatedAt,
-			DriverStatus: string(driver.Status),
-			DriverInfo:   driverInfoStr,
-		}
-
-		items = append(items, item)
-	}
-
-	return items, nil
+	return filtered
 }
 
 // GetDriverWeeklyOrderRanks 獲取司機週接單排行榜

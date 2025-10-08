@@ -10,6 +10,7 @@ type DashboardStats struct {
 	TodayOrders          OrderStats       `json:"todayOrders"`
 	ReservationOrders    ReservationStats `json:"reservationOrders"`
 	OnlineDrivers        DriverStats      `json:"onlineDrivers"`
+	OfflineDrivers       DriverStats      `json:"offlineDrivers"`
 	IdleDrivers          DriverStats      `json:"idleDrivers"`
 	PickingUpDrivers     int              `json:"pickingUpDrivers"`
 	ExecutingTaskDrivers int              `json:"executingTaskDrivers"`
@@ -41,31 +42,39 @@ type GetAllDriversResponse struct {
 
 type GetDriverOrdersInput struct {
 	common.BaseSearchPaginationInput
-	DriverStatus string `query:"driverStatus" doc:"司機狀態過濾：all(全部)/enroute(前往載客)/executing(執行任務)/idle(空車)，預設為 all"`
+	DriverStatus string `query:"driverStatus" doc:"司機狀態過濾：all(全部)/閒置/前往上車點/司機抵達/執行任務，預設為 all"`
 }
 
-// DashboardItem 統一的 dashboard 項目，可以是訂單或司機狀態
-type DashboardItem struct {
-	Type string     `json:"type" doc:"類型：order(訂單) 或 driver(司機狀態)"`
-	Time *time.Time `json:"time" doc:"時間（訂單時間或司機狀態更新時間）"`
+// DriverOrderItem 司機訂單項目
+type DriverOrderItem struct {
+	// 司機資訊
+	DriverInfo   string `json:"driverInfo" doc:"司機資訊：車牌 | 司機名稱" example:"ABC-5808(黑) | 料理鼠王"`
+	DriverFleet  string `json:"driverFleet" doc:"司機車隊"`
+	DriverStatus string `json:"driverStatus" doc:"司機狀態"`
 
-	// 訂單相關欄位（當 Type = "order" 時使用）
-	OrderID        string `json:"orderId,omitempty"`
-	ShortID        string `json:"shortId,omitempty"`
-	OrderStatus    string `json:"orderStatus,omitempty"`
-	PickupAddress  string `json:"pickupAddress,omitempty"`
-	OriText        string `json:"ori_text,omitempty"`
-	OriTextDisplay string `json:"ori_text_display,omitempty"`
-	Hints          string `json:"hints,omitempty"`
+	// 即時訂單資訊（當司機有即時訂單時）
+	OrderID        string     `json:"orderId,omitempty" doc:"即時訂單ID"`
+	ShortID        string     `json:"shortId,omitempty" doc:"訂單短ID"`
+	OrderStatus    string     `json:"orderStatus,omitempty" doc:"訂單狀態"`
+	PickupAddress  string     `json:"pickupAddress,omitempty" doc:"上車地點"`
+	OriText        string     `json:"ori_text,omitempty" doc:"原始文字"`
+	OriTextDisplay string     `json:"ori_text_display,omitempty" doc:"顯示文字"`
+	Hints          string     `json:"hints,omitempty" doc:"備註"`
+	Time           *time.Time `json:"time,omitempty" doc:"訂單時間"`
 
-	// 司機相關欄位（兩種類型都會有）
-	DriverStatus string `json:"driverStatus,omitempty" doc:"司機狀態"`
-	DriverInfo   string `json:"driverInfo,omitempty" doc:"司機資訊：車隊|司機編號|司機名稱"`
+	// 預約訂單資訊（當司機有預約訂單時）
+	ScheduleOrderID     string     `json:"scheduleOrderId,omitempty" doc:"預約訂單ID"`
+	ScheduleShortID     string     `json:"scheduleShortId,omitempty" doc:"預約訂單短ID"`
+	ScheduleOrderStatus string     `json:"scheduleOrderStatus,omitempty" doc:"預約訂單狀態"`
+	ScheduleOriText     string     `json:"scheduleOriText,omitempty" doc:"預約訂單原始文字"`
+	SchedulePickup      string     `json:"schedulePickupAddress,omitempty" doc:"預約訂單上車地點"`
+	ScheduleTime        *time.Time `json:"scheduleTime,omitempty" doc:"預約時間"`
+	ScheduleHints       string     `json:"scheduleHints,omitempty" doc:"預約訂單備註"`
 }
 
 type GetDriverOrdersResponse struct {
 	Body struct {
-		Data       []DashboardItem       `json:"data" doc:"司機訂單和狀態列表"`
+		Data       []DriverOrderItem     `json:"data" doc:"司機訂單列表"`
 		Pagination common.PaginationInfo `json:"pagination" doc:"分頁資訊"`
 	} `json:"body"`
 }

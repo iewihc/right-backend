@@ -36,6 +36,7 @@ type DriverWithJkoAccount struct {
 type OrderSummaryItem struct {
 	*model.Order `bson:",inline"`
 	Driver       DriverWithJkoAccount `json:"driver,omitempty" bson:"driver,omitempty"`
+	DriverInfo   string               `json:"driverInfo,omitempty" doc:"司機資訊：車牌 (顏色) | 司機名稱" example:"ABC-5808 (黑) | 料理鼠王"`
 }
 
 // GetOrderSummaryResponse 獲取訂單報表列表回應

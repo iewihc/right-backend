@@ -997,7 +997,7 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 
 		notification := map[string]interface{}{
 			"title": fmt.Sprintf("來自%s的新訂單", string(order.Fleet)),
-			"body":  fmt.Sprintf("%s，預估%d分鐘(%.1f公里)可到達客上地點。", order.OriTextDisplay, finalEstPickupMins, distanceKm),
+			"body":  fmt.Sprintf("%s，預估%d分鐘(%.1f公里)可到達客上地點。", order.OriText, finalEstPickupMins, distanceKm),
 			"sound": "new_order.wav",
 		}
 

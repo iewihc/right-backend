@@ -2254,7 +2254,7 @@ func (s *OrderService) sendFCMCancellationNotification(ctx context.Context, orde
 	}
 
 	// 一律顯示為「乘客取消」
-	bodyMessage = fmt.Sprintf("%s %s 已被乘客取消", orderType, order.OriTextDisplay)
+	bodyMessage = fmt.Sprintf("%s %s 已被乘客取消", orderType, order.OriText)
 
 	// 決定通知標題
 	var title string

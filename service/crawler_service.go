@@ -52,7 +52,7 @@ func NewCrawlerService(logger zerolog.Logger, redisClient *infra.Redis) (*Crawle
 	config := CrawlerConfig{
 		IsDebug:      isDebug,
 		SkipWarmup:   false,
-		PoolSize:     5,
+		PoolSize:     2,
 		DisableCache: false,
 	}
 	return NewCrawlerServiceWithConfig(logger, redisClient, config)

@@ -26,6 +26,32 @@ func GetDriverInfo(driver *model.DriverInfo) string {
 	return fleet + "|" + driverNo + "|" + name
 }
 
+// GetDriverInfoWithPlate 格式化司機資訊（包含車牌和顏色，不含車隊）
+// 格式：ABC-5808(黑) | 料理鼠王
+func GetDriverInfoWithPlate(driver *model.DriverInfo) string {
+	if driver == nil {
+		return "未知車牌 | 未知司機"
+	}
+
+	// 組合車牌和顏色
+	carPlate := driver.CarPlate
+	if carPlate == "" {
+		carPlate = "未知車牌"
+	}
+
+	carColor := driver.CarColor
+	if carColor != "" {
+		carPlate = carPlate + "(" + carColor + ")"
+	}
+
+	name := driver.Name
+	if name == "" {
+		name = "未知司機"
+	}
+
+	return carPlate + " | " + name
+}
+
 // GetOrderShortID 從完整的訂單 ID 生成短 ID，格式為 # + 最後四碼
 // 例如：ObjectID("507f1f77bcf86cd799439011") -> "#9011"
 func GetOrderShortID(fullOrderID string) string {
