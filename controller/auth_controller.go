@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"right-backend/data-models/auth"
+	"right-backend/data-models/common"
 	"right-backend/infra"
 	"right-backend/model"
 	"right-backend/service"
@@ -364,5 +365,56 @@ func (c *AuthController) RegisterRoutes(api huma.API) {
 		resp.Body.Message = "註冊成功，等待審核"
 
 		return resp, nil
+	})
+
+	// App 版本驗證
+	huma.Register(api, huma.Operation{
+		OperationID: "auth-app-version",
+		Method:      "POST",
+		Path:        "/auth/app-version",
+		Summary:     "App版本驗證",
+		Description: "驗證客戶端App版本是否符合系統要求",
+		Tags:        []string{"auth"},
+	}, func(ctx context.Context, input *common.AuthAppVersionInput) (*common.AuthAppVersionResponse, error) {
+		span := trace.SpanFromContext(ctx)
+
+		clientVersion := input.Body.AppVersion
+		requiredVersion := infra.AppConfig.App.AppVersion
+
+		c.logger.Info().
+			Str("client_version", clientVersion).
+			Str("required_version", requiredVersion).
+			Str("trace_id", span.SpanContext().TraceID().String()).
+			Msg("App版本驗證請求")
+
+		// 檢查版本是否相符
+		if clientVersion != requiredVersion {
+			c.logger.Warn().
+				Str("client_version", clientVersion).
+				Str("required_version", requiredVersion).
+				Str("trace_id", span.SpanContext().TraceID().String()).
+				Msg("App版本不符，要求更新")
+
+			return &common.AuthAppVersionResponse{
+				Body: *common.ErrorResponse[common.AuthAppVersionData]("系統偵測您的版本過低，請您重新下載以及登入", "版本不符"),
+			}, huma.Error401Unauthorized("系統偵測您的版本過低，請您重新下載以及登入")
+		}
+
+		// 版本符合
+		c.logger.Info().
+			Str("client_version", clientVersion).
+			Str("required_version", requiredVersion).
+			Str("trace_id", span.SpanContext().TraceID().String()).
+			Msg("App版本驗證通過")
+
+		data := &common.AuthAppVersionData{
+			Valid:          true,
+			CurrentVersion: requiredVersion,
+			ClientVersion:  clientVersion,
+		}
+
+		return &common.AuthAppVersionResponse{
+			Body: *common.SuccessResponse("版本驗證通過", data),
+		}, nil
 	})
 }

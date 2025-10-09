@@ -51,6 +51,7 @@ type Driver struct {
 	Name                 string  `json:"name,omitempty" bson:"name,omitempty" example:"王小明" doc:"司機姓名"`
 	Duration             int     `json:"duration,omitempty" bson:"duration,omitempty" doc:"司機用時時間(秒)"`
 	ArrivalDeviationSecs *int    `json:"arrival_deviation_secs,omitempty" bson:"arrival_deviation_secs,omitempty" doc:"到達時間偏差(秒)，正值表示遲到，負值表示早到"`
+	FCMSentTime          *int64  `json:"fcm_sent_time,omitempty" bson:"fcm_sent_time,omitempty" example:"1756291114" doc:"FCM 推送發送時間（Unix timestamp UTC+8）"`
 }
 
 type Order struct {
@@ -91,12 +92,15 @@ type Order struct {
 	ConvertedFrom        string              `json:"converted_from,omitempty" bson:"converted_from,omitempty" doc:"轉換來源（如：scheduled）"`
 	LineMessages         []LineMessageInfo   `json:"line_messages,omitempty" bson:"line_messages,omitempty" doc:"LINE 消息記錄"`
 	Logs                 []OrderLogEntry     `json:"logs,omitempty" bson:"logs,omitempty" doc:"訂單日誌"`
+	HasPets              bool                `json:"has_pets,omitempty" bson:"has_pets,omitempty" doc:"訂單是否包含寵物（偵測到關鍵字：狗、貓、寵、籠）"`
+	HasOverloaded        bool                `json:"has_overloaded,omitempty" bson:"has_overloaded,omitempty" doc:"訂單是否超載（偵測到關鍵字：5人、五人、6人、六人）"`
 }
 
 type OrderLogAction string
 
 const (
 	OrderLogActionCreated        OrderLogAction = "訂單建立"
+	OrderLogActionDriverNotified OrderLogAction = "司機通知"
 	OrderLogActionDriverReject   OrderLogAction = "司機拒絕"
 	OrderLogActionDriverTimeout  OrderLogAction = "司機未接"
 	OrderLogActionDriverAccept   OrderLogAction = "司機接單"

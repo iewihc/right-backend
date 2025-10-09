@@ -387,6 +387,11 @@ func (s *OrderService) SimpleCreateOrder(ctx context.Context, orderText string, 
 		createdByUserName = createdByName[0]
 	}
 
+	// 偵測訂單中的關鍵字
+	hasPets := strings.ContainsAny(orderText, "狗貓寵籠")
+	hasOverloaded := strings.Contains(orderText, "5人") || strings.Contains(orderText, "五人") ||
+		strings.Contains(orderText, "6人") || strings.Contains(orderText, "六人")
+
 	order := &model.Order{
 		OriText:        orderText,                     // 保存原始輸入文字
 		OriTextDisplay: customerGroup + "/" + address, // 保存客群/地址部分，不含hint內容
@@ -394,6 +399,8 @@ func (s *OrderService) SimpleCreateOrder(ctx context.Context, orderText string, 
 		CreatedBy:      createdByUserName,             // 設置建立者姓名
 		CreatedType:    string(createdBy),             // 設置建立者類型
 		IsErrand:       isErrand,                      // 設置跑腿標記
+		HasPets:        hasPets,                       // 設置寵物標記
+		HasOverloaded:  hasOverloaded,                 // 設置超載標記
 	}
 
 	// 設置客群和車隊

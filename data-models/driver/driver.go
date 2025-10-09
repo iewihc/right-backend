@@ -299,3 +299,10 @@ type UpdateDeviceInput struct {
 		DeviceAppVersion   string `json:"device_app_version" doc:"應用程式版本" example:"1.2.3"`
 	} `json:"body"`
 }
+
+type UpdateDriverSettingsInput struct {
+	Body struct {
+		NoPets       *bool `json:"no_pets,omitempty" doc:"禁止寵物訂單（不接有寵物的單）" example:"true"`
+		NoOverloaded *bool `json:"no_overloaded,omitempty" doc:"禁止超載訂單（不接5人以上的單）" example:"true"`
+	} `json:"body"`
+}

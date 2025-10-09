@@ -37,6 +37,7 @@ type NotifyingOrder struct {
 	OrderID          string              `json:"order_id" example:"68aee0265ac3591b32e2d13a"`
 	RemainingSeconds int                 `json:"remaining_seconds" example:"12"`
 	OrderData        *NotifyingOrderData `json:"order_data"`
+	FCMSentTime      *int64              `json:"fcm_sent_time,omitempty" example:"1756291114" doc:"FCM 推送發送時間（Unix timestamp）"`
 }
 
 // CheckNotifyingOrderData 檢查通知中訂單的資料
@@ -54,7 +55,8 @@ type CheckNotifyingOrderResponse struct {
 type RedisNotifyingOrder struct {
 	OrderID        string              `json:"order_id"`
 	DriverID       string              `json:"driver_id"`
-	PushTime       int64               `json:"push_time"`       // 推送時間戳記
-	TimeoutSeconds int                 `json:"timeout_seconds"` // 超時秒數
-	OrderData      *NotifyingOrderData `json:"order_data"`      // 訂單資料
+	PushTime       int64               `json:"push_time"`        // 推送時間戳記
+	TimeoutSeconds int                 `json:"timeout_seconds"`  // 超時秒數
+	OrderData      *NotifyingOrderData `json:"order_data"`       // 訂單資料
+	FCMSentTime    *int64              `json:"fcm_sent_time"`    // FCM 發送時間戳記
 }

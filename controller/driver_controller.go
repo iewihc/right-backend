@@ -98,6 +98,38 @@ func (c *DriverController) RegisterRoutes(api huma.API) {
 		return &driver.DriverResponse{Body: updatedDriver}, nil
 	})
 
+	// 更新司機設定（禁寵、禁五人）
+	huma.Register(api, huma.Operation{
+		OperationID: "update-driver-settings",
+		Method:      "PUT",
+		Path:        "/drivers/settings",
+		Summary:     "更新當前司機的設定",
+		Description: "更新當前登入司機的設定，包括禁寵、禁五人等。司機ID會從JWT Bearer token中自動獲取。",
+		Tags:        []string{"drivers"},
+		Middlewares: huma.Middlewares{c.authMiddleware.Auth()},
+		Security: []map[string][]string{
+			{"bearerAuth": {}},
+		},
+	}, func(ctx context.Context, input *driver.UpdateDriverSettingsInput) (*driver.DriverResponse, error) {
+		driverFromToken, err := auth.GetDriverFromContext(ctx)
+		if err != nil {
+			c.logger.Error().Err(err).Msg("無法從token中獲取司機資訊")
+			return nil, huma.Error500InternalServerError("無法從token中獲取司機資訊")
+		}
+		driverID := driverFromToken.ID.Hex()
+
+		c.logger.Info().Str("driver_id", driverID).Str("driver_name", driverFromToken.Name).Msg("司機正在更新設定")
+
+		updatedDriver, err := c.driverService.UpdateDriverSettings(ctx, driverID, input.Body.NoPets, input.Body.NoOverloaded)
+		if err != nil {
+			c.logger.Error().Err(err).Str("driver_id", driverID).Msg("更新司機設定失敗")
+			return nil, huma.Error400BadRequest("更新司機設定失敗", err)
+		}
+
+		c.logger.Info().Str("driver_id", driverID).Msg("司機設定更新成功")
+		return &driver.DriverResponse{Body: updatedDriver}, nil
+	})
+
 	// 獲取當前司機的完整資料
 	huma.Register(api, huma.Operation{
 		OperationID: "get-current-driver",

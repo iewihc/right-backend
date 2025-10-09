@@ -18,7 +18,8 @@ type LineConfigYAML struct {
 
 type Config struct {
 	App struct {
-		IsCrawler bool `yaml:"is_crawler"`
+		IsCrawler  bool   `yaml:"is_crawler"`
+		AppVersion string `yaml:"app_version"`
 	} `yaml:"app"`
 	DriverBlacklist struct {
 		Enabled       bool `yaml:"enabled"`

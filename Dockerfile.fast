@@ -25,9 +25,20 @@ COPY config.yml /config.yml
 ENV PLAYWRIGHT_DOWNLOAD_HOST=https://playwright.azureedge.net
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=
 
-RUN apt-get update && apt-get install -y ca-certificates tzdata curl \
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    tzdata \
+    curl \
+    fontconfig \
+    # 安裝中文字體支援
+    fonts-noto-cjk \
+    fonts-noto-cjk-extra \
+    fonts-wqy-microhei \
+    fonts-wqy-zenhei \
     # 只安裝 chromium 瀏覽器（比安裝所有瀏覽器快）
     && /playwright install --with-deps chromium \
+    # 重建字體快取
+    && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8090

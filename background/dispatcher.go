@@ -508,6 +508,28 @@ func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Orde
 			}
 		}
 
+		// 檢查司機的禁寵設定，如果司機設定禁寵且訂單包含寵物，則跳過
+		if drv.NoPets && order.HasPets {
+			d.logger.Debug().
+				Str("short_id", order.ShortID).
+				Str("driver_name", drv.Name).
+				Str("car_plate", drv.CarPlate).
+				Bool("has_pets", order.HasPets).
+				Msg("調度中心司機設定禁寵，訂單包含寵物，已過濾")
+			continue
+		}
+
+		// 檢查司機的禁五人設定，如果司機設定禁五人且訂單超載，則跳過
+		if drv.NoOverloaded && order.HasOverloaded {
+			d.logger.Debug().
+				Str("short_id", order.ShortID).
+				Str("driver_name", drv.Name).
+				Str("car_plate", drv.CarPlate).
+				Bool("has_overloaded", order.HasOverloaded).
+				Msg("調度中心司機設定禁五人，訂單超載，已過濾")
+			continue
+		}
+
 		lat, _ := strconv.ParseFloat(drv.Lat, 64)
 		lng, _ := strconv.ParseFloat(drv.Lng, 64)
 		if lat != 0 && lng != 0 {
@@ -937,7 +959,7 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 		// 使用新的原子性檢查並通知司機
 		var driverNotificationRelease func()
 		if d.EventManager != nil {
-			lockTTL := sequentialCallTimeout + 5*time.Second // 比等待時間稍長
+			lockTTL := sequentialCallTimeout + 3*time.Second // 比等待時間稍長
 			success, reason, atomicErr := d.EventManager.AtomicNotifyDriver(ctx,
 				driver.ID.Hex(),
 				order.ID.Hex(),
@@ -1039,9 +1061,31 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 				infra.AttrString("car_plate", driver.CarPlate),
 			)
 			// 推送成功後立即記錄準確的發送時間到 Redis
+			pushTime := time.Now() // FCM發送成功的當下時間
 			if d.EventManager != nil {
-				pushTime := time.Now() // FCM發送成功的當下時間
 				d.recordNotifyingOrder(fcmCtx, order, driver, &orderInfoForDriver, pushTime, int(sequentialCallTimeout.Seconds()))
+			}
+
+			// 記錄 FCM 發送到訂單 log
+			taipeiLocation := time.FixedZone("Asia/Taipei", 8*3600)
+			fcmSentTimeUTC8 := pushTime.In(taipeiLocation)
+			logDetails := fmt.Sprintf("FCM發送: %s | 預估: %d分鐘(%.1fkm)",
+				fcmSentTimeUTC8.Format("2006-01-02 15:04:05"),
+				finalEstPickupMins,
+				distanceKm)
+
+			currentRounds := 1
+			if order.Rounds != nil {
+				currentRounds = *order.Rounds
+			}
+
+			if err := d.OrderSvc.AddOrderLog(fcmCtx, order.ID.Hex(), model.OrderLogActionDriverNotified,
+				string(driver.Fleet), driver.Name, driver.CarPlate, driver.ID.Hex(),
+				logDetails, currentRounds); err != nil {
+				d.logger.Error().Err(err).
+					Str("short_id", order.ShortID).
+					Str("driver_id", driver.ID.Hex()).
+					Msg("記錄 FCM 發送日誌失敗")
 			}
 		}
 
@@ -1636,12 +1680,17 @@ func (d *Dispatcher) recordNotifyingOrder(ctx context.Context, order *model.Orde
 		notifyingOrderData.ScheduledTime = &scheduledTimeStr
 	}
 
+	// 轉換為台北時間 (UTC+8) 並記錄 FCM 發送時間
+	taipeiLocation := time.FixedZone("Asia/Taipei", 8*3600)
+	fcmSentTimeUTC8 := pushTime.In(taipeiLocation).Unix()
+
 	redisNotifyingOrder := &driverModels.RedisNotifyingOrder{
 		OrderID:        order.ID.Hex(),
 		DriverID:       driver.ID.Hex(),
 		PushTime:       pushTime.Unix(),
 		TimeoutSeconds: timeoutSeconds,
 		OrderData:      notifyingOrderData,
+		FCMSentTime:    &fcmSentTimeUTC8,
 	}
 
 	// 序列化並儲存到 Redis
@@ -1664,12 +1713,17 @@ func (d *Dispatcher) recordNotifyingOrder(ctx context.Context, order *model.Orde
 			Str("cache_key", notifyingOrderKey).
 			Msg("記錄 notifying order 到 Redis 失敗")
 	} else {
-		d.logger.Debug().
+		logEvent := d.logger.Debug().
 			Str("order_id", order.ID.Hex()).
 			Str("driver_id", driver.ID.Hex()).
 			Str("cache_key", notifyingOrderKey).
-			Dur("ttl", ttl).
-			Msg("成功記錄 notifying order 到 Redis")
+			Dur("ttl", ttl)
+
+		if redisNotifyingOrder.FCMSentTime != nil {
+			logEvent.Int64("fcm_sent_time", *redisNotifyingOrder.FCMSentTime)
+		}
+
+		logEvent.Msg("成功記錄 notifying order 到 Redis")
 	}
 }
 

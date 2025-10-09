@@ -45,6 +45,8 @@ type DriverInfo struct {
 	ScheduledTime          *time.Time         `json:"scheduled_time,omitempty" bson:"scheduled_time,omitempty" doc:"預約時間"`
 	CurrentOrderScheduleId *string            `json:"current_order_schedule_id,omitempty" bson:"current_order_schedule_id,omitempty" doc:"當前預約訂單ID"`
 	CurrentOrderId         *string            `json:"current_order_id,omitempty" bson:"current_order_id,omitempty" doc:"當前即時訂單ID"`
+	NoPets                 bool               `json:"no_pets" bson:"no_pets" example:"false" doc:"禁止寵物訂單（不接有寵物的單）"`
+	NoOverloaded           bool               `json:"no_overloaded" bson:"no_overloaded" example:"false" doc:"禁止超載訂單（不接5人以上的單）"`
 	CreatedAt              time.Time          `json:"created_at" bson:"created_at" doc:"建立時間"`
 	UpdatedAt              time.Time          `json:"updated_at" bson:"updated_at" doc:"更新時間"`
 }

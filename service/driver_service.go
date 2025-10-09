@@ -745,7 +745,7 @@ func (s *DriverService) CalcDistanceAndMins(ctx context.Context, driver *model.D
 }
 
 // buildDriverObject 構建訂單司機資訊物件
-func (s *DriverService) buildDriverObject(driver *model.DriverInfo, adjustMins *int, distanceKm float64, estPickupMins int, estPickupTimeStr string) model.Driver {
+func (s *DriverService) buildDriverObject(driver *model.DriverInfo, adjustMins *int, distanceKm float64, estPickupMins int, estPickupTimeStr string, fcmSentTime *int64) model.Driver {
 	return model.Driver{
 		AssignedDriver:  driver.ID.Hex(),
 		CarNo:           driver.CarPlate,
@@ -758,14 +758,25 @@ func (s *DriverService) buildDriverObject(driver *model.DriverInfo, adjustMins *
 		EstPickupMins:   estPickupMins,
 		EstPickupDistKm: distanceKm,
 		EstPickupTime:   estPickupTimeStr,
+		FCMSentTime:     fcmSentTime,
 	}
 }
 
 // addAcceptOrderLog 新增接單日誌
-func (s *DriverService) addAcceptOrderLog(ctx context.Context, orderID string, driver *model.DriverInfo, finalEstPickupMins int, distanceKm float64, currentRounds int) {
+func (s *DriverService) addAcceptOrderLog(ctx context.Context, orderID string, driver *model.DriverInfo, finalEstPickupMins int, distanceKm float64, currentRounds int, fcmSentTime *int64) {
+	details := fmt.Sprintf("預估到達時間: %d分鐘 (距離: %.2fkm)", finalEstPickupMins, distanceKm)
+
+	// 如果有 FCM 發送時間，加入 details
+	if fcmSentTime != nil {
+		// 轉換為台北時間字串
+		taipeiLocation := time.FixedZone("Asia/Taipei", 8*3600)
+		fcmTime := time.Unix(*fcmSentTime, 0).In(taipeiLocation)
+		details += fmt.Sprintf(" | FCM發送: %s", fcmTime.Format("2006-01-02 15:04:05"))
+	}
+
 	if err := s.orderService.AddOrderLog(ctx, orderID, model.OrderLogActionDriverAccept,
 		string(driver.Fleet), driver.Name, driver.CarPlate, driver.ID.Hex(),
-		fmt.Sprintf("預估到達時間: %d分鐘 (距離: %.2fkm)", finalEstPickupMins, distanceKm), currentRounds); err != nil {
+		details, currentRounds); err != nil {
 		s.logger.Error().
 			Str("訂單編號", orderID).
 			Str("司機編號", driver.ID.Hex()).
@@ -778,6 +789,26 @@ func (s *DriverService) AcceptOrder(ctx context.Context, driver *model.DriverInf
 	// 步驟1: 從Redis中獲取計算厚的訂單數據 (
 	distanceKm, estPickupMins, foundPreCalc := s.getPreRedisData(ctx, driver.ID.Hex(), orderID)
 
+	// 步驟1.5: 從 Redis 獲取 FCM 發送時間
+	var fcmSentTime *int64
+	if s.eventManager != nil {
+		notifyingOrderKey := fmt.Sprintf("notifying_order:%s", driver.ID.Hex())
+		cachedData, err := s.eventManager.GetCache(ctx, notifyingOrderKey)
+		if err == nil && cachedData != "" {
+			var redisNotifyingOrder driverModels.RedisNotifyingOrder
+			if unmarshalErr := json.Unmarshal([]byte(cachedData), &redisNotifyingOrder); unmarshalErr == nil {
+				if redisNotifyingOrder.OrderID == orderID {
+					fcmSentTime = redisNotifyingOrder.FCMSentTime
+					s.logger.Debug().
+						Str("order_id", orderID).
+						Str("driver_id", driver.ID.Hex()).
+						Int64("fcm_sent_time", *fcmSentTime).
+						Msg("從 Redis 獲取 FCM 發送時間")
+				}
+			}
+		}
+	}
+
 	// 步驟2: 計算最終預估時間
 	finalEstPickupMins := estPickupMins
 	if adjustMins != nil {
@@ -789,8 +820,8 @@ func (s *DriverService) AcceptOrder(ctx context.Context, driver *model.DriverInf
 	estPickupTime := requestTime.Add(time.Duration(finalEstPickupMins) * time.Minute).In(taipeiLocation)
 	estPickupTimeStr := estPickupTime.Format("15:04:05")
 
-	// 步驟3: 構建司機物件
-	driverInfoForOrder := s.buildDriverObject(driver, adjustMins, distanceKm, estPickupMins, estPickupTimeStr)
+	// 步驟3: 構建司機物件（包含 FCM 發送時間）
+	driverInfoForOrder := s.buildDriverObject(driver, adjustMins, distanceKm, estPickupMins, estPickupTimeStr, fcmSentTime)
 
 	// 步驟4: 原子性訂單更新（CAS操作）
 	matched, err := s.orderService.AcceptOrderAction(ctx, orderID, driverInfoForOrder, model.OrderStatusEnroute, &requestTime)
@@ -894,7 +925,7 @@ func (s *DriverService) AcceptOrder(ctx context.Context, driver *model.DriverInf
 			if order.Rounds != nil {
 				currentRounds = *order.Rounds
 			}
-			s.addAcceptOrderLog(bgCtx, orderID, driver, finalEstPickupMins, distanceKm, currentRounds)
+			s.addAcceptOrderLog(bgCtx, orderID, driver, finalEstPickupMins, distanceKm, currentRounds, fcmSentTime)
 		}
 	}()
 
@@ -1065,8 +1096,8 @@ func (s *DriverService) ActivateScheduledOrder(ctx context.Context, driver *mode
 	estPickupTime := activateTime.Add(time.Duration(estPickupMins) * time.Minute).In(taipeiLocation)
 	estPickupTimeStr := estPickupTime.Format("15:04:05")
 
-	// 步驟3: 更新訂單狀態為前往上車點，並更新司機狀態
-	driverInfoForOrder := s.buildDriverObject(driver, nil, distanceKm, estPickupMins, estPickupTimeStr)
+	// 步驟3: 更新訂單狀態為前往上車點，並更新司機狀態（預約單激活不需要 FCM 發送時間）
+	driverInfoForOrder := s.buildDriverObject(driver, nil, distanceKm, estPickupMins, estPickupTimeStr, nil)
 
 	matched, err := s.orderService.ActivateScheduledOrderWithCondition(ctx, orderID, driverInfoForOrder, model.OrderStatusScheduleAccepted, &requestTime)
 	if err != nil {
@@ -1834,6 +1865,7 @@ func (s *DriverService) CheckNotifyingOrder(ctx context.Context, driverID string
 		OrderID:          redisNotifyingOrder.OrderID,
 		RemainingSeconds: remainingSeconds,
 		OrderData:        redisNotifyingOrder.OrderData,
+		FCMSentTime:      redisNotifyingOrder.FCMSentTime,
 	}
 
 	s.logger.Debug().
@@ -2674,8 +2706,15 @@ func (s *DriverService) calculateArrivalDeviationWithNotification(ctx context.Co
 
 // HandlePickupCertificateUpload 處理司機上傳抵達證明的完整業務邏輯
 func (s *DriverService) HandlePickupCertificateUpload(ctx context.Context, driver *model.DriverInfo, orderID string, file multipart.File, header *multipart.FileHeader, requestTime time.Time, fileStorageService *FileStorageService) (string, string, error) {
-	// 1. 使用 FileStorageService 上傳文件
-	uploadResult, err := fileStorageService.UploadPickupCertificateFile(ctx, file, header, orderID, driver.CarPlate)
+	// 1. 先獲取訂單以取得 ArrivalTime 和 OriText
+	order, err := s.orderService.GetOrderByID(ctx, orderID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("driver_id", driver.ID.Hex()).Str("order_id", orderID).Msg("獲取訂單失敗")
+		return "", "", fmt.Errorf("獲取訂單失敗: %w", err)
+	}
+
+	// 2. 使用 FileStorageService 上傳文件（傳遞 ArrivalTime 和 OriText）
+	uploadResult, err := fileStorageService.UploadPickupCertificateFile(ctx, file, header, orderID, driver.CarPlate, order.ArrivalTime, order.OriText)
 	if err != nil {
 		s.logger.Error().Err(err).Str("driver_id", driver.ID.Hex()).Str("order_id", orderID).Msg("檔案上傳失敗")
 		return "", "", fmt.Errorf("檔案上傳失敗: %w", err)
@@ -2683,7 +2722,7 @@ func (s *DriverService) HandlePickupCertificateUpload(ctx context.Context, drive
 
 	s.logger.Info().Str("driver_name", driver.Name).Str("car_plate", driver.CarPlate).Str("order_id", orderID).Str("file_url", uploadResult.URL).Msg("司機已成功上傳抵達證明")
 
-	// 2. 使用統一的司機抵達處理邏輯（包含照片URL）
+	// 3. 使用統一的司機抵達處理邏輯（包含照片URL）
 	driverStatus, orderStatus, err := s.HandleDriverArrival(ctx, driver, orderID, uploadResult.URL)
 	if err != nil {
 		s.logger.Error().Err(err).Str("order_id", orderID).Msg("處理司機抵達報告失敗")
@@ -2818,4 +2857,44 @@ func (s *DriverService) GetDriversByFleet(ctx context.Context, fleet model.Fleet
 
 	s.logger.Info().Int("drivers_count", len(drivers)).Str("fleet", string(fleet)).Msg("成功獲取車隊司機列表")
 	return drivers, nil
+}
+
+// UpdateDriverSettings 更新司機設定（禁寵、禁五人）
+func (s *DriverService) UpdateDriverSettings(ctx context.Context, driverID string, noPets *bool, noOverloaded *bool) (*model.DriverInfo, error) {
+	objectID, err := primitive.ObjectIDFromHex(driverID)
+	if err != nil {
+		s.logger.Error().Str("driver_id", driverID).Err(err).Msg("無效的司機ID格式")
+		return nil, fmt.Errorf("無效的司機ID格式: %w", err)
+	}
+
+	updateFields := bson.M{}
+	if noPets != nil {
+		updateFields["no_pets"] = *noPets
+		s.logger.Info().Str("driver_id", driverID).Bool("no_pets", *noPets).Msg("更新司機禁寵設定")
+	}
+	if noOverloaded != nil {
+		updateFields["no_overloaded"] = *noOverloaded
+		s.logger.Info().Str("driver_id", driverID).Bool("no_overloaded", *noOverloaded).Msg("更新司機禁五人設定")
+	}
+
+	if len(updateFields) == 0 {
+		return s.GetDriverByID(ctx, driverID)
+	}
+
+	updateFields["updated_at"] = time.Now()
+
+	collection := s.mongoDB.GetCollection("drivers")
+	filter := bson.M{"_id": objectID}
+	update := bson.M{"$set": updateFields}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var updatedDriver model.DriverInfo
+	err = collection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&updatedDriver)
+	if err != nil {
+		s.logger.Error().Str("driver_id", driverID).Err(err).Msg("更新司機設定失敗")
+		return nil, fmt.Errorf("更新司機設定失敗: %w", err)
+	}
+
+	s.logger.Info().Str("driver_id", driverID).Msg("司機設定更新成功")
+	return &updatedDriver, nil
 }

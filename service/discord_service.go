@@ -3,13 +3,18 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"net/http"
+	"os"
+	"path/filepath"
 	"right-backend/model"
 	"right-backend/service/interfaces"
 	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -1981,17 +1986,59 @@ func (s *DiscordService) handleDiscordReplyMessage(m *discordgo.MessageCreate) {
 	// 發送消息到聊天系統（使用真實Discord用戶名）
 	content := m.Content
 	discordUsername := fmt.Sprintf("discord_%s", m.Author.Username) // 使用真實Discord用戶名
+
+	// 檢查是否有圖片附件
+	var messageType model.MessageType
+	var imageURL *string
+
+	if len(m.Attachments) > 0 {
+		// 檢查第一個附件是否為圖片
+		attachment := m.Attachments[0]
+		// Discord 圖片附件的 content type 通常是 image/png, image/jpeg 等
+		if strings.HasPrefix(attachment.ContentType, "image/") {
+			s.logger.Info().
+				Str("order_id", orderID).
+				Str("image_url", attachment.URL).
+				Str("content_type", attachment.ContentType).
+				Msg("檢測到Discord圖片附件，開始下載")
+
+			// 下載 Discord 圖片並保存到本地
+			relativePath, err := s.downloadDiscordImage(context.Background(), attachment.URL, orderID, order.ID.Hex())
+			if err != nil {
+				s.logger.Error().Err(err).
+					Str("order_id", orderID).
+					Str("image_url", attachment.URL).
+					Msg("下載Discord圖片失敗")
+				// 下載失敗，發送文字消息通知
+				messageType = model.MessageTypeText
+				errorContent := "圖片下載失敗"
+				content = errorContent
+			} else {
+				messageType = model.MessageTypeImage
+				imageURL = &relativePath
+				s.logger.Info().
+					Str("order_id", orderID).
+					Str("relative_path", relativePath).
+					Msg("Discord圖片下載成功，準備發送給司機")
+			}
+		} else {
+			messageType = model.MessageTypeText
+		}
+	} else {
+		messageType = model.MessageTypeText
+	}
+
 	_, err = s.chatService.SendMessage(
 		context.Background(),
 		orderID,
 		discordUsername, // 使用真實的Discord用戶名作為sender
 		model.SenderTypeSupport,
-		model.MessageTypeText,
+		messageType,
 		&content,
-		nil, // audioURL
-		nil, // imageURL
-		nil, // audioDuration
-		nil, // tempID
+		nil,      // audioURL
+		imageURL, // imageURL
+		nil,      // audioDuration
+		nil,      // tempID
 	)
 
 	if err != nil {
@@ -2007,11 +2054,12 @@ func (s *DiscordService) handleDiscordReplyMessage(m *discordgo.MessageCreate) {
 		Str("order_id", orderID).
 		Str("driver_id", order.Driver.AssignedDriver).
 		Str("content", content).
+		Str("message_type", string(messageType)).
 		Str("author", m.Author.Username).
 		Msg("Discord回覆消息已成功轉發給司機")
 
 	// 發送FCM推送通知給司機
-	go s.sendChatFCMNotification(context.Background(), order.Driver.AssignedDriver, content, order)
+	go s.sendChatFCMNotification(context.Background(), order.Driver.AssignedDriver, content, messageType, order)
 
 	// 向Discord發送確認回應
 	err = s.session.MessageReactionAdd(m.ChannelID, m.ID, "✅")
@@ -2054,7 +2102,7 @@ func (s *DiscordService) findOrderByDiscordMessage(channelID, messageID string) 
 }
 
 // sendChatFCMNotification 發送聊天FCM推送通知給司機
-func (s *DiscordService) sendChatFCMNotification(ctx context.Context, driverID, content string, order *model.Order) {
+func (s *DiscordService) sendChatFCMNotification(ctx context.Context, driverID, content string, messageType model.MessageType, order *model.Order) {
 	if s.fcmService == nil {
 		s.logger.Warn().Msg("FCM服務未初始化，跳過聊天推送通知")
 		return
@@ -2076,6 +2124,14 @@ func (s *DiscordService) sendChatFCMNotification(ctx context.Context, driverID, 
 		return
 	}
 
+	// 根據消息類型決定顯示內容
+	var displayContent string
+	if messageType == model.MessageTypeImage {
+		displayContent = "圖片"
+	} else {
+		displayContent = content
+	}
+
 	// 準備FCM推送數據
 	data := map[string]interface{}{
 		"type":      string(model.NotifyTypeChat), // 使用定義的通知類型
@@ -2088,7 +2144,7 @@ func (s *DiscordService) sendChatFCMNotification(ctx context.Context, driverID, 
 
 	notification := map[string]interface{}{
 		"title": "客服回覆",
-		"body":  content,
+		"body":  displayContent,
 		"sound": "msg_alert.wav", // 使用聊天音效
 	}
 
@@ -2764,4 +2820,65 @@ func (s *DiscordService) updateInteractionResponseOrderCard(i *discordgo.Interac
 			Str("short_id", shortID).
 			Msg("成功更新 interaction response 為訂單字卡")
 	}
+}
+
+// downloadDiscordImage 下載 Discord 圖片並保存到本地
+func (s *DiscordService) downloadDiscordImage(ctx context.Context, imageURL, orderID, messageID string) (string, error) {
+	// 下載圖片
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("下載圖片失敗: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("下載圖片失敗，HTTP 狀態碼: %d", resp.StatusCode)
+	}
+
+	// 獲取文件擴展名
+	ext := filepath.Ext(imageURL)
+	if ext == "" || strings.Contains(ext, "?") {
+		// 如果 URL 沒有擴展名或包含查詢參數，使用 .jpg 作為默認
+		ext = ".jpg"
+	}
+	// 移除查詢參數
+	if idx := strings.Index(ext, "?"); idx != -1 {
+		ext = ext[:idx]
+	}
+
+	// 生成唯一文件名
+	filename := fmt.Sprintf("discord_image_%s_%s%s", messageID, uuid.New().String(), ext)
+
+	// 創建目錄路徑 uploads/chat/{orderID}
+	uploadDir := filepath.Join("uploads", "chat", orderID)
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return "", fmt.Errorf("創建目錄失敗: %w", err)
+	}
+
+	// 完整文件路徑
+	filePath := filepath.Join(uploadDir, filename)
+
+	// 創建文件
+	outFile, err := os.Create(filePath)
+	if err != nil {
+		return "", fmt.Errorf("創建文件失敗: %w", err)
+	}
+	defer outFile.Close()
+
+	// 寫入文件
+	_, err = io.Copy(outFile, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("保存文件失敗: %w", err)
+	}
+
+	// 返回相對路徑（從 uploads 開始）
+	relativePath := filepath.Join("chat", orderID, filename)
+
+	s.logger.Info().
+		Str("image_url", imageURL).
+		Str("saved_path", filePath).
+		Str("relative_path", relativePath).
+		Msg("Discord 圖片下載並保存成功")
+
+	return relativePath, nil
 }
