@@ -766,14 +766,6 @@ func (s *DriverService) buildDriverObject(driver *model.DriverInfo, adjustMins *
 func (s *DriverService) addAcceptOrderLog(ctx context.Context, orderID string, driver *model.DriverInfo, finalEstPickupMins int, distanceKm float64, currentRounds int, fcmSentTime *int64) {
 	details := fmt.Sprintf("預估到達時間: %d分鐘 (距離: %.2fkm)", finalEstPickupMins, distanceKm)
 
-	// 如果有 FCM 發送時間，加入 details
-	if fcmSentTime != nil {
-		// 轉換為台北時間字串
-		taipeiLocation := time.FixedZone("Asia/Taipei", 8*3600)
-		fcmTime := time.Unix(*fcmSentTime, 0).In(taipeiLocation)
-		details += fmt.Sprintf(" | FCM發送: %s", fcmTime.Format("2006-01-02 15:04:05"))
-	}
-
 	if err := s.orderService.AddOrderLog(ctx, orderID, model.OrderLogActionDriverAccept,
 		string(driver.Fleet), driver.Name, driver.CarPlate, driver.ID.Hex(),
 		details, currentRounds); err != nil {

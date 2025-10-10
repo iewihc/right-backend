@@ -741,6 +741,9 @@ func (d *Dispatcher) buildOrderInfo(ctx context.Context, order *model.Order) (*m
 	// 預估從上車點到目的地的時間與距離
 	var estPickToDestDist string
 	var estPickToDestMins int
+
+	// 暫時註解：目前不使用目的地資訊，不需要計算上車點到目的地的距離
+	/*
 	if order.Customer.DestAddress != "" && order.Customer.PickupLat != nil && order.Customer.PickupLng != nil && order.Customer.DestLat != nil && order.Customer.DestLng != nil {
 		pickupCoord := fmt.Sprintf("%s,%s", *order.Customer.PickupLat, *order.Customer.PickupLng)
 		destCoord := fmt.Sprintf("%s,%s", *order.Customer.DestLat, *order.Customer.DestLng)
@@ -759,6 +762,7 @@ func (d *Dispatcher) buildOrderInfo(ctx context.Context, order *model.Order) (*m
 			d.logger.Warn().Str("short_id", order.ShortID).Msg("調度中心CrawlerService未初始化，無法計算上車點到目的地的距離")
 		}
 	}
+	*/
 
 	orderInfo := &model.OrderInfo{
 		ID:                 *order.ID,

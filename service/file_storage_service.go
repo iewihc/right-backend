@@ -94,7 +94,7 @@ func (fs *FileStorageService) loadWatermarkFont() font.Face {
 					fs.logger.Warn().Err(fontErr).Msg("無法取得 TTC 第一個字體")
 				} else {
 					fs.watermarkFont, fs.fontLoadError = opentype.NewFace(firstFont, &opentype.FaceOptions{
-						Size:    24,
+						Size:    40,
 						DPI:     72,
 						Hinting: font.HintingFull,
 					})
@@ -110,7 +110,7 @@ func (fs *FileStorageService) loadWatermarkFont() font.Face {
 			ttf, err := opentype.Parse(fontData)
 			if err == nil {
 				fs.watermarkFont, fs.fontLoadError = opentype.NewFace(ttf, &opentype.FaceOptions{
-					Size:    24,
+					Size:    40,
 					DPI:     72,
 					Hinting: font.HintingFull,
 				})
@@ -125,7 +125,7 @@ func (fs *FileStorageService) loadWatermarkFont() font.Face {
 		fs.logger.Warn().Msg("未能載入中文字體，使用 Go 內建字體")
 		ttf, _ := opentype.Parse(goregular.TTF)
 		fs.watermarkFont, _ = opentype.NewFace(ttf, &opentype.FaceOptions{
-			Size:    24,
+			Size:    40,
 			DPI:     72,
 			Hinting: font.HintingFull,
 		})
@@ -221,35 +221,39 @@ func (fs *FileStorageService) addWatermarkToImage(imgData image.Image, watermark
 		lines = append(lines, oriText)
 	}
 
-	// 計算所有行的最大寬度
+	// 計算所有行的寬度（用於右對齊）
+	lineWidths := make([]int, len(lines))
 	maxWidth := 0
-	for _, line := range lines {
+	for i, line := range lines {
 		lineWidth := drawer.MeasureString(line).Ceil()
+		lineWidths[i] = lineWidth
 		if lineWidth > maxWidth {
 			maxWidth = lineWidth
 		}
 	}
 
-	// 行高設定
-	lineHeight := 30
+	// 行高設定（根據字體大小調整，40pt 字體）
+	lineHeight := 50
 
 	// 設置位置：右上角，留15像素邊距
-	startX := bounds.Max.X - maxWidth - 15
-	startY := 35 // 第一行從頂部開始35像素
+	rightEdge := bounds.Max.X - 15
+	startY := 55 // 第一行從頂部開始55像素
 
 	// 計算背景矩形大小
-	bgHeight := len(lines)*lineHeight + 8
-	bgRect := image.Rect(startX-8, startY-28, startX+maxWidth+8, startY-28+bgHeight)
+	bgHeight := len(lines)*lineHeight + 16
+	bgRect := image.Rect(rightEdge-maxWidth-16, startY-45, rightEdge+8, startY-45+bgHeight)
 
 	// 繪製背景（黑色半透明矩形）
 	bgColor := color.RGBA{0, 0, 0, 180}
 	draw.Draw(rgba, bgRect, &image.Uniform{bgColor}, image.Point{}, draw.Over)
 
-	// 繪製每一行文字
+	// 繪製每一行文字（右對齊）
 	for i, line := range lines {
 		y := startY + (i * lineHeight)
+		// 右對齊：從右邊界減去該行的寬度
+		x := rightEdge - lineWidths[i]
 		drawer.Dot = fixed.Point26_6{
-			X: fixed.I(startX),
+			X: fixed.I(x),
 			Y: fixed.I(y),
 		}
 		drawer.DrawString(line)

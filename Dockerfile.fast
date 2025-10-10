@@ -1,12 +1,14 @@
 # 優化版 Dockerfile - 使用國內鏡像加速
 # Stage 1: Modules caching
 FROM golang:1.24.2 as modules
+ENV GODEBUG=netdns=go
 COPY go.mod go.sum /modules/
 WORKDIR /modules
 RUN go mod download
 
 # Stage 2: Build
 FROM golang:1.24.2 as builder
+ENV GODEBUG=netdns=go
 COPY --from=modules /go/pkg /go/pkg
 COPY . /workdir
 WORKDIR /workdir
