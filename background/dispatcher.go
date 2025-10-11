@@ -171,7 +171,7 @@ func (d *Dispatcher) handleOrder(ctx context.Context, order *model.Order) {
 
 	// 1. Find best candidate drivers
 	infra.AddEvent(dispatchSpan, "finding_candidate_drivers")
-	candidates, distances, durationMins, err := d.findCandidateDrivers(dispatchCtx, order)
+	candidates, distances, durationMins, crawlerCompletedAt, err := d.findCandidateDrivers(dispatchCtx, order)
 	if err != nil {
 		// 記錄錯誤到 span
 		infra.RecordError(dispatchSpan, err, "Find candidate drivers failed",
@@ -235,7 +235,7 @@ func (d *Dispatcher) handleOrder(ctx context.Context, order *model.Order) {
 	infra.AddEvent(dispatchSpan, "dispatching_to_drivers",
 		infra.AttrInt("candidates_count", len(candidates)),
 	)
-	orderMatched, err := d.dispatchOrderToDrivers(dispatchCtx, order, candidates, distances, durationMins)
+	orderMatched, err := d.dispatchOrderToDrivers(dispatchCtx, order, candidates, distances, durationMins, crawlerCompletedAt)
 	if err != nil {
 		// 記錄錯誤到 span
 		infra.RecordError(dispatchSpan, err, "Dispatch to drivers failed",
@@ -334,7 +334,7 @@ func (d *Dispatcher) handleOrder(ctx context.Context, order *model.Order) {
 }
 
 // 第一步驟 查找並過濾出最佳的候選司機 (上線司機)
-func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Order) ([]*model.DriverInfo, []string, []int, error) {
+func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Order) ([]*model.DriverInfo, []string, []int, time.Time, error) {
 	// 獲取當前 span
 	span := trace.SpanFromContext(ctx)
 
@@ -381,7 +381,7 @@ func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Orde
 			Str("trace_id", span.SpanContext().TraceID().String()).
 			Str("span_id", findSpan.SpanContext().SpanID().String()).
 			Msg("查詢司機失敗")
-		return nil, nil, nil, err
+		return nil, nil, nil, time.Time{}, err
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
@@ -398,7 +398,7 @@ func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Orde
 			Str("trace_id", span.SpanContext().TraceID().String()).
 			Str("span_id", findSpan.SpanContext().SpanID().String()).
 			Msg("解析司機失敗")
-		return nil, nil, nil, err
+		return nil, nil, nil, time.Time{}, err
 	}
 
 	// 添加初始司機數量事件
@@ -548,7 +548,7 @@ func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Orde
 			Str("trace_id", span.SpanContext().TraceID().String()).
 			Str("span_id", findSpan.SpanContext().SpanID().String()).
 			Msg("調度中心無可派發的有效司機(可能全部被拒絕或無位置)")
-		return nil, nil, nil, nil
+		return nil, nil, nil, time.Time{}, nil
 	}
 
 	// 添加有效司機數量事件
@@ -636,6 +636,9 @@ func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Orde
 		crawlerErr = fmt.Errorf("CrawlerService 未初始化")
 	}
 
+	// 記錄 Crawler 完成計算的時間，用於後續動態補時計算
+	crawlerCompletedAt := time.Now()
+
 	if crawlerErr != nil {
 		infra.RecordError(findSpan, crawlerErr, "Crawler distance calculation failed",
 			infra.AttrString("error", crawlerErr.Error()),
@@ -644,7 +647,7 @@ func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Orde
 			Str("trace_id", span.SpanContext().TraceID().String()).
 			Str("span_id", findSpan.SpanContext().SpanID().String()).
 			Msg("Crawler 距離計算失敗")
-		return nil, nil, nil, crawlerErr
+		return nil, nil, nil, time.Time{}, crawlerErr
 	}
 
 	// 檢查結果數量是否匹配
@@ -733,7 +736,7 @@ func (d *Dispatcher) findCandidateDrivers(ctx context.Context, order *model.Orde
 		infra.AttrInt("candidates.final", len(finalCandidates)),
 	)
 
-	return finalCandidates, distances, durationMins, nil
+	return finalCandidates, distances, durationMins, crawlerCompletedAt, nil
 }
 
 // buildOrderInfo 建立要發送給司機的訂單資訊
@@ -791,10 +794,10 @@ func (d *Dispatcher) buildOrderInfo(ctx context.Context, order *model.Order) (*m
 }
 
 // dispatchOrderToDrivers 執行訂單派送邏輯
-func (d *Dispatcher) dispatchOrderToDrivers(ctx context.Context, order *model.Order, candidates []*model.DriverInfo, distances []string, durationMins []int) (bool, error) {
+func (d *Dispatcher) dispatchOrderToDrivers(ctx context.Context, order *model.Order, candidates []*model.DriverInfo, distances []string, durationMins []int, crawlerCompletedAt time.Time) (bool, error) {
 	// 僅使用 FCM 推送
 	if d.FcmSvc != nil {
-		return d.sendFcm(ctx, order, candidates, distances, durationMins)
+		return d.sendFcm(ctx, order, candidates, distances, durationMins, crawlerCompletedAt)
 	}
 
 	d.logger.Error().Msg("FCM服務未初始化")
@@ -802,7 +805,7 @@ func (d *Dispatcher) dispatchOrderToDrivers(ctx context.Context, order *model.Or
 }
 
 // sendFcm 使用FCM服務依序推送訂單給司機
-func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates []*model.DriverInfo, distances []string, durationMins []int) (bool, error) {
+func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates []*model.DriverInfo, distances []string, durationMins []int, crawlerCompletedAt time.Time) (bool, error) {
 	// 獲取當前 span
 	span := trace.SpanFromContext(ctx)
 
@@ -999,20 +1002,23 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 		orderInfoForDriver := *baseOrderInfo
 		estPickupMins := durationMins[i]
 
-		// 計算補時：每個司機發送間隔17秒，累積超過30秒就補時1分鐘
-		cumulativeWaitSeconds := i * int(sequentialCallTimeout.Seconds()) // 當前司機的累積等待時間（秒）
-		compensationMins := cumulativeWaitSeconds / 30                    // 每30秒補時1分鐘
+		// 記錄準備發送 FCM 的時間（發送前記錄）
+		pushTime := time.Now()
+
+		// 動態計算補時：基於 Crawler 完成後到當前 FCM 發送的實際等待時間
+		elapsedSinceCalc := int(pushTime.Sub(crawlerCompletedAt).Seconds())
+		compensationMins := elapsedSinceCalc / 30 // 每30秒補時1分鐘
 		finalEstPickupMins := estPickupMins + compensationMins
 
 		orderInfoForDriver.EstPickUpDist = utils.ParseDistanceToKm(distances[i])
 		orderInfoForDriver.EstPickupMins = finalEstPickupMins
-		// 轉換為台北時間
+		// 轉換為台北時間，使用 pushTime 作為基準
 		taipeiLocation := time.FixedZone("Asia/Taipei", 8*3600)
-		orderInfoForDriver.EstPickupTime = time.Now().Add(time.Duration(finalEstPickupMins) * time.Minute).In(taipeiLocation).Format("15:04:05")
+		orderInfoForDriver.EstPickupTime = pushTime.Add(time.Duration(finalEstPickupMins) * time.Minute).In(taipeiLocation).Format("15:04:05")
 
 		distanceKm := utils.ParseDistanceToKm(distances[i])
 		driverInfo := utils.GetDriverInfo(driver)
-		d.logger.Info().Str("short_id", order.ShortID).Str("ori_text", order.OriText).Int("rank", i+1).Str("driver_info", driverInfo).Int("original_mins", estPickupMins).Int("compensation_mins", compensationMins).Int("final_mins", finalEstPickupMins).Int("cumulative_wait_seconds", cumulativeWaitSeconds).Float64("distance_km", distanceKm).Msg("[調度中心-{short_id}]: ({ori_text}) FCM 第{rank}順位司機: {driver_info} (累計等待{cumulative_wait_seconds}秒, 原始{original_mins}分鐘+補時{compensation_mins}分鐘=最終{final_mins}分鐘 {distance_km}公里)")
+		d.logger.Info().Str("short_id", order.ShortID).Str("ori_text", order.OriText).Int("rank", i+1).Str("driver_info", driverInfo).Int("original_mins", estPickupMins).Int("compensation_mins", compensationMins).Int("final_mins", finalEstPickupMins).Int("elapsed_since_calc_seconds", elapsedSinceCalc).Float64("distance_km", distanceKm).Msg("[調度中心-{short_id}]: ({ori_text}) FCM 第{rank}順位司機: {driver_info} (Crawler完成後經過{elapsed_since_calc_seconds}秒, 原始{original_mins}分鐘+補時{compensation_mins}分鐘=最終{final_mins}分鐘 {distance_km}公里)")
 
 		// 使用統一的推送資料模型
 		pushData := orderInfoForDriver.ToOrderPushData(int(sequentialCallTimeout.Seconds()))
@@ -1064,8 +1070,7 @@ func (d *Dispatcher) sendFcm(ctx context.Context, order *model.Order, candidates
 				infra.AttrDriverID(driver.ID.Hex()),
 				infra.AttrString("car_plate", driver.CarPlate),
 			)
-			// 推送成功後立即記錄準確的發送時間到 Redis
-			pushTime := time.Now() // FCM發送成功的當下時間
+			// 推送成功後記錄到 Redis（使用發送前記錄的 pushTime）
 			if d.EventManager != nil {
 				d.recordNotifyingOrder(fcmCtx, order, driver, &orderInfoForDriver, pushTime, int(sequentialCallTimeout.Seconds()))
 			}
