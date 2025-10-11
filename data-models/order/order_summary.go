@@ -95,7 +95,7 @@ type BatchEditOrderItem struct {
 // BatchEditOrderInput 批量編輯訂單輸入
 type BatchEditOrderInput struct {
 	Body struct {
-		Orders []BatchEditOrderItem `json:"orders" doc:"訂單編輯列表" minItems:"1" maxItems:"100"`
+		Orders []BatchEditOrderItem `json:"orders" doc:"訂單編輯列表" minItems:"1"`
 	} `json:"body"`
 }
 

@@ -13,16 +13,18 @@ import (
 )
 
 type OrderSummaryController struct {
-	logger              zerolog.Logger
-	orderSummaryService *service.OrderSummaryService
-	authMiddleware      *middleware.UserAuthMiddleware
+	logger                   zerolog.Logger
+	orderSummaryService      *service.OrderSummaryService
+	orderImportExportService *service.OrderImportExportService
+	authMiddleware           *middleware.UserAuthMiddleware
 }
 
-func NewOrderSummaryController(logger zerolog.Logger, orderSummaryService *service.OrderSummaryService, authMiddleware *middleware.UserAuthMiddleware) *OrderSummaryController {
+func NewOrderSummaryController(logger zerolog.Logger, orderSummaryService *service.OrderSummaryService, orderImportExportService *service.OrderImportExportService, authMiddleware *middleware.UserAuthMiddleware) *OrderSummaryController {
 	return &OrderSummaryController{
-		logger:              logger.With().Str("module", "order_summary_controller").Logger(),
-		orderSummaryService: orderSummaryService,
-		authMiddleware:      authMiddleware,
+		logger:                   logger.With().Str("module", "order_summary_controller").Logger(),
+		orderSummaryService:      orderSummaryService,
+		orderImportExportService: orderImportExportService,
+		authMiddleware:           authMiddleware,
 	}
 }
 
@@ -86,6 +88,18 @@ func (c *OrderSummaryController) RegisterRoutes(api huma.API) {
 				sortField = parts[0]
 				sortOrder = parts[1]
 			}
+		}
+
+		// 欄位名稱對應（駝峰式轉蛇形式）
+		fieldMapping := map[string]string{
+			"amountNote":  "amount_note",
+			"createdAt":   "created_at",
+			"shortId":     "short_id",
+			"passengerId": "passenger_id",
+			"oriText":     "ori_text",
+		}
+		if mappedField, exists := fieldMapping[sortField]; exists {
+			sortField = mappedField
 		}
 
 		orders, total, err := c.orderSummaryService.GetOrderSummary(ctx, input.GetPageNum(), input.GetPageSize(), filter, sortField, sortOrder)
@@ -200,11 +214,6 @@ func (c *OrderSummaryController) RegisterRoutes(api huma.API) {
 			return nil, huma.Error400BadRequest("訂單列表不能為空")
 		}
 
-		if len(input.Body.Orders) > 100 {
-			c.logger.Error().Msg("一次最多只能編輯100筆訂單")
-			return nil, huma.Error400BadRequest("一次最多只能編輯100筆訂單")
-		}
-
 		// 執行批量編輯
 		results := c.orderSummaryService.BatchEditOrders(ctx, input.Body.Orders)
 
@@ -231,5 +240,147 @@ func (c *OrderSummaryController) RegisterRoutes(api huma.API) {
 			Msg("批量編輯訂單完成")
 
 		return response, nil
+	})
+
+	// 匯入訂單檢查
+	huma.Register(api, huma.Operation{
+		OperationID:   "import-orders-check",
+		Method:        "POST",
+		Path:          "/order-summary/import-orders-check",
+		Summary:       "匯入訂單檢查",
+		Description:   "檢查 Excel 檔案並返回預計匯入的訂單數量",
+		Tags:          []string{"order-summary"},
+		DefaultStatus: 200,
+	}, func(ctx context.Context, input *order.ImportOrdersCheckInput) (*order.ImportOrdersCheckResponse, error) {
+		// 驗證車隊
+		if input.Fleet == "" {
+			c.logger.Error().Msg("車隊名稱不能為空")
+			return nil, huma.Error400BadRequest("車隊名稱不能為空")
+		}
+
+		// 檢查檔案
+		files := input.RawBody.File["file"]
+		if len(files) == 0 {
+			c.logger.Error().Msg("Excel 檔案不能為空")
+			return nil, huma.Error400BadRequest("Excel 檔案不能為空")
+		}
+
+		fileHeader := files[0]
+		file, err := fileHeader.Open()
+		if err != nil {
+			c.logger.Error().Err(err).Msg("無法開啟上傳的檔案")
+			return nil, huma.Error400BadRequest("無法開啟上傳的檔案", err)
+		}
+		defer file.Close()
+
+		currentCount, importCount, err := c.orderImportExportService.CheckImportOrders(ctx, input.Fleet, input.HasHeader, file)
+		if err != nil {
+			c.logger.Error().Err(err).Msg("檢查匯入訂單失敗")
+			return nil, huma.Error400BadRequest("檢查匯入訂單失敗", err)
+		}
+
+		response := &order.ImportOrdersCheckResponse{}
+		response.Body.CurrentOrdersCount = currentCount
+		response.Body.ImportOrdersCount = importCount
+
+		c.logger.Info().
+			Int("current_count", currentCount).
+			Int("import_count", importCount).
+			Str("fleet", input.Fleet).
+			Msg("匯入訂單檢查完成")
+
+		return response, nil
+	})
+
+	// 匯入訂單
+	huma.Register(api, huma.Operation{
+		OperationID:   "import-orders",
+		Method:        "POST",
+		Path:          "/order-summary/import-orders",
+		Summary:       "匯入訂單",
+		Description:   "從 Excel 檔案匯入訂單",
+		Tags:          []string{"order-summary"},
+		DefaultStatus: 200,
+	}, func(ctx context.Context, input *order.ImportOrdersInput) (*order.ImportOrdersResponse, error) {
+		// 驗證車隊
+		if input.Fleet == "" {
+			c.logger.Error().Msg("車隊名稱不能為空")
+			return nil, huma.Error400BadRequest("車隊名稱不能為空")
+		}
+
+		// 檢查檔案
+		files := input.RawBody.File["file"]
+		if len(files) == 0 {
+			c.logger.Error().Msg("Excel 檔案不能為空")
+			return nil, huma.Error400BadRequest("Excel 檔案不能為空")
+		}
+
+		fileHeader := files[0]
+		file, err := fileHeader.Open()
+		if err != nil {
+			c.logger.Error().Err(err).Msg("無法開啟上傳的檔案")
+			return nil, huma.Error400BadRequest("無法開啟上傳的檔案", err)
+		}
+		defer file.Close()
+
+		successCount, failedCount, errors, err := c.orderImportExportService.ImportOrders(ctx, input.Fleet, input.HasHeader, file)
+		if err != nil {
+			c.logger.Error().Err(err).Msg("匯入訂單失敗")
+			return nil, huma.Error500InternalServerError("匯入訂單失敗", err)
+		}
+
+		response := &order.ImportOrdersResponse{}
+		response.Body.SuccessCount = successCount
+		response.Body.FailedCount = failedCount
+		response.Body.Errors = errors
+
+		c.logger.Info().
+			Int("success_count", successCount).
+			Int("failed_count", failedCount).
+			Str("fleet", input.Fleet).
+			Msg("匯入訂單完成")
+
+		return response, nil
+	})
+
+	// 匯出訂單
+	huma.Register(api, huma.Operation{
+		OperationID:   "export-orders",
+		Method:        "GET",
+		Path:          "/order-summary/export-orders",
+		Summary:       "匯出訂單",
+		Description:   "匯出訂單到 Excel 檔案",
+		Tags:          []string{"order-summary"},
+		DefaultStatus: 200,
+	}, func(ctx context.Context, input *order.ExportOrdersInput) (*huma.StreamResponse, error) {
+		// 匯出訂單
+		f, err := c.orderImportExportService.ExportOrders(ctx, input.Fleet, input.StartDate, input.EndDate, input.HasHeader)
+		if err != nil {
+			c.logger.Error().Err(err).Msg("匯出訂單失敗")
+			return nil, huma.Error500InternalServerError("匯出訂單失敗", err)
+		}
+
+		// 準備檔案名稱
+		filename := "orders.xlsx"
+		if input.StartDate != "" || input.EndDate != "" {
+			filename = "orders_" + input.StartDate + "_" + input.EndDate + ".xlsx"
+		}
+
+		c.logger.Info().
+			Str("fleet", input.Fleet).
+			Str("start_date", input.StartDate).
+			Str("end_date", input.EndDate).
+			Msg("匯出訂單完成")
+
+		// 返回 Excel 檔案
+		return &huma.StreamResponse{
+			Body: func(ctx huma.Context) {
+				ctx.SetHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+				ctx.SetHeader("Content-Disposition", "attachment; filename="+filename)
+				if err := f.Write(ctx.BodyWriter()); err != nil {
+					c.logger.Error().Err(err).Msg("寫入 Excel 檔案失敗")
+				}
+			},
+		}, nil
 	})
 }

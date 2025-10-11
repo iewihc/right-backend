@@ -47,9 +47,9 @@ type OrderSummaryFilter struct {
 func (s *OrderSummaryService) GetOrderSummary(ctx context.Context, pageNum, pageSize int, filter *OrderSummaryFilter, sortField, sortOrder string) ([]*orderModels.OrderSummaryItem, int64, error) {
 	collection := s.mongoDB.GetCollection("orders")
 
-	// 基本過濾條件：排除流單狀態
+	// 基本過濾條件：排除流單和系統失敗狀態
 	matchFilter := bson.M{
-		"status": bson.M{"$ne": model.OrderStatusFailed},
+		"status": bson.M{"$nin": []model.OrderStatus{model.OrderStatusFailed, model.OrderStatusSystemFailed}},
 	}
 
 	// 應用過濾器
@@ -84,12 +84,13 @@ func (s *OrderSummaryService) GetOrderSummary(ctx context.Context, pageNum, page
 			matchFilter["customer_group"] = bson.M{"$regex": filter.CustomerGroup, "$options": "i"}
 		}
 
-		// 狀態過濾（排除流單狀態）
+		// 狀態過濾（排除流單和系統失敗狀態）
 		if len(filter.Status) > 0 {
-			// 過濾掉「流單」狀態
+			// 過濾掉「流單」和「系統失敗」狀態
 			filteredStatuses := []string{}
 			for _, status := range filter.Status {
-				if status != string(model.OrderStatusFailed) && status != "流單" {
+				if status != string(model.OrderStatusFailed) && status != "流單" &&
+					status != string(model.OrderStatusSystemFailed) && status != "系統失敗" {
 					filteredStatuses = append(filteredStatuses, status)
 				}
 			}

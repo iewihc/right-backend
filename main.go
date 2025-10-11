@@ -377,9 +377,10 @@ func main() {
 		orderScheduleService := service.NewOrderScheduleService(log.Logger, orderService, driverService)
 		orderScheduleController := controller.NewOrderScheduleController(log.Logger, orderScheduleService, driverAuthMiddleware, userAuthMiddleware)
 
-		// 創建 OrderSummaryService
+		// 創建 OrderSummaryService 和 OrderImportExportService
 		orderSummaryService := service.NewOrderSummaryService(log.Logger, services.MongoDB)
-		orderSummaryController := controller.NewOrderSummaryController(log.Logger, orderSummaryService, userAuthMiddleware)
+		orderImportExportService := service.NewOrderImportExportService(log.Logger, services.MongoDB)
+		orderSummaryController := controller.NewOrderSummaryController(log.Logger, orderSummaryService, orderImportExportService, userAuthMiddleware)
 		driverController := controller.NewDriverController(log.Logger, driverService, orderService, orderScheduleService, driverAuthMiddleware, fileStorageService, baseURL)
 		userController := controller.NewUserController(log.Logger, userService, orderService, userAuthMiddleware)
 		authController := controller.NewAuthController(log.Logger, userService, driverService)
