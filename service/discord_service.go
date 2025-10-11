@@ -783,9 +783,6 @@ func (s *DiscordService) UpdateOrderCard(order *model.Order) {
 			})
 		}
 
-		if order.Amount != nil {
-			finalFields = append(finalFields, &discordgo.MessageEmbedField{Name: "車資", Value: fmt.Sprintf("$%d", *order.Amount), Inline: true})
-		}
 		embed.Fields = finalFields
 
 		// 添加司機上傳的到達證明照片

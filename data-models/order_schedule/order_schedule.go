@@ -47,8 +47,9 @@ type CurrentScheduledOrderData struct {
 	OrderStatus    string `json:"order_status" example:"schedule_accepted" doc:"訂單狀態"`
 	DriverStatus   string `json:"driver_status" example:"busy" doc:"司機狀態"`
 	ScheduledTime  string `json:"scheduled_time" example:"2025-09-21 14:30:00" doc:"預約時間"`
-	Amount         *int   `json:"amount,omitempty" example:"10" doc:"金額"`
 	AmountNote     string `json:"amount_note,omitempty" doc:"金額備註"`
+	Income         *int   `json:"income,omitempty" example:"100" doc:"收入"`
+	Expense        *int   `json:"expense,omitempty" example:"50" doc:"支出"`
 	PassengerID    string `json:"passenger_id,omitempty" doc:"乘客ID"`
 	Fleet          string `json:"fleet" example:"RSK" doc:"車隊"`
 	Rounds         *int   `json:"rounds,omitempty" example:"1" doc:"派單輪數"`

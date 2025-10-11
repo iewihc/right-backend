@@ -18,6 +18,10 @@ type GetOrderSummaryInput struct {
 	Driver        string `query:"driver" doc:"司機過濾 (司機姓名)，可選"`
 	CustomerGroup string `query:"customerGroup" doc:"客群過濾，可選"`
 	PassengerID   string `query:"passengerID" doc:"乘客ID過濾，可選"`
+	ShortID       string `query:"shortID" doc:"訂單短ID過濾 (支援格式:#xxxxx 或 xxxxx)，可選"`
+	Remarks       string `query:"remarks" doc:"備註過濾 (針對customer.remarks進行模糊搜尋)，可選"`
+	AmountNote    string `query:"amountNote" doc:"金額備註過濾 (針對amount_note進行模糊搜尋)，可選"`
+	Keyword       string `query:"keyword" doc:"關鍵字搜尋 (針對ori_text進行模糊搜尋)，可選"`
 }
 
 // OrderSummaryIDInput 訂單報表ID輸入
@@ -68,5 +72,45 @@ type UpdateOrderSummaryInput struct {
 		PassengerID   *string            `json:"passenger_id,omitempty" doc:"乘客ID"`
 		CustomerGroup *string            `json:"customer_group,omitempty" doc:"客群"`
 		Customer      *model.Customer    `json:"customer,omitempty" doc:"客戶資訊"`
+	} `json:"body"`
+}
+
+// BatchEditField 批量編輯的欄位
+type BatchEditField struct {
+	CreatedAt   *string            `json:"created_at,omitempty" doc:"訂單日期時間 (ISO8601格式，例如：2024-01-15T14:30:00+08:00)"`
+	OriText     *string            `json:"ori_text,omitempty" doc:"上車地點(原始輸入文字)"`
+	Status      *model.OrderStatus `json:"status,omitempty" doc:"訂單狀態"`
+	Income      *int               `json:"income,omitempty" doc:"收入"`
+	Expense     *int               `json:"expense,omitempty" doc:"支出"`
+	AmountNote  *string            `json:"amount_note,omitempty" doc:"金額備註"`
+	PassengerID *string            `json:"passenger_id,omitempty" doc:"乘客ID"`
+}
+
+// BatchEditOrderItem 單個訂單的編輯項目
+type BatchEditOrderItem struct {
+	OrderID string         `json:"order_id" doc:"訂單ID" minLength:"24" maxLength:"24"`
+	Fields  BatchEditField `json:"fields" doc:"要編輯的欄位（只更新有提供的欄位）"`
+}
+
+// BatchEditOrderInput 批量編輯訂單輸入
+type BatchEditOrderInput struct {
+	Body struct {
+		Orders []BatchEditOrderItem `json:"orders" doc:"訂單編輯列表" minItems:"1" maxItems:"100"`
+	} `json:"body"`
+}
+
+// BatchEditResult 批量編輯結果
+type BatchEditResult struct {
+	OrderID string `json:"order_id" doc:"訂單ID"`
+	Success bool   `json:"success" doc:"是否成功"`
+	Error   string `json:"error,omitempty" doc:"錯誤訊息（如果失敗）"`
+}
+
+// BatchEditOrderResponse 批量編輯訂單回應
+type BatchEditOrderResponse struct {
+	Body struct {
+		Results      []BatchEditResult `json:"results" doc:"每個訂單的編輯結果"`
+		SuccessCount int               `json:"success_count" doc:"成功數量"`
+		FailCount    int               `json:"fail_count" doc:"失敗數量"`
 	} `json:"body"`
 }

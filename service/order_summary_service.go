@@ -37,6 +37,10 @@ type OrderSummaryFilter struct {
 	OrderID       string
 	Driver        string
 	PassengerID   string
+	ShortID       string
+	Remarks       string
+	AmountNote    string
+	Keyword       string
 }
 
 // GetOrderSummary 獲取訂單報表列表，支援自訂排序
@@ -125,6 +129,28 @@ func (s *OrderSummaryService) GetOrderSummary(ctx context.Context, pageNum, page
 		// 乘客ID過濾
 		if filter.PassengerID != "" {
 			matchFilter["passenger_id"] = bson.M{"$regex": filter.PassengerID, "$options": "i"}
+		}
+
+		// ShortID過濾
+		if filter.ShortID != "" {
+			// 如果有#前綴，去掉它
+			shortID := strings.TrimPrefix(filter.ShortID, "#")
+			matchFilter["short_id"] = bson.M{"$regex": shortID, "$options": "i"}
+		}
+
+		// 備註過濾（針對customer.remarks進行模糊搜尋）
+		if filter.Remarks != "" {
+			matchFilter["customer.remarks"] = bson.M{"$regex": filter.Remarks, "$options": "i"}
+		}
+
+		// 金額備註過濾（針對amount_note進行模糊搜尋）
+		if filter.AmountNote != "" {
+			matchFilter["amount_note"] = bson.M{"$regex": filter.AmountNote, "$options": "i"}
+		}
+
+		// 關鍵字搜尋（針對ori_text進行模糊搜尋）
+		if filter.Keyword != "" {
+			matchFilter["ori_text"] = bson.M{"$regex": filter.Keyword, "$options": "i"}
 		}
 	}
 
@@ -327,4 +353,94 @@ func (s *OrderSummaryService) DeleteOrder(ctx context.Context, orderID string) e
 
 	s.logger.Info().Str("order_id", orderID).Msg("訂單刪除成功 (Order deleted successfully)")
 	return nil
+}
+
+// BatchEditOrders 批量編輯訂單
+func (s *OrderSummaryService) BatchEditOrders(ctx context.Context, orders []orderModels.BatchEditOrderItem) []orderModels.BatchEditResult {
+	results := make([]orderModels.BatchEditResult, len(orders))
+	collection := s.mongoDB.GetCollection("orders")
+
+	for i, order := range orders {
+		result := orderModels.BatchEditResult{
+			OrderID: order.OrderID,
+			Success: false,
+		}
+
+		// 驗證訂單ID格式
+		objectID, err := primitive.ObjectIDFromHex(order.OrderID)
+		if err != nil {
+			result.Error = "無效的訂單ID格式"
+			results[i] = result
+			s.logger.Error().Str("order_id", order.OrderID).Err(err).Msg("無效的訂單ID格式")
+			continue
+		}
+
+		// 構建更新欄位
+		updateFields := bson.M{
+			"updated_at": time.Now(),
+		}
+
+		// 只更新有提供的欄位
+		if order.Fields.CreatedAt != nil {
+			// 解析時間字符串
+			parsedTime, err := time.Parse(time.RFC3339, *order.Fields.CreatedAt)
+			if err != nil {
+				result.Error = "訂單日期時間格式錯誤，請使用ISO8601格式"
+				results[i] = result
+				s.logger.Error().Str("order_id", order.OrderID).Err(err).Msg("訂單日期時間格式錯誤")
+				continue
+			}
+			updateFields["created_at"] = parsedTime
+		}
+
+		if order.Fields.OriText != nil {
+			updateFields["ori_text"] = *order.Fields.OriText
+		}
+
+		if order.Fields.Status != nil {
+			updateFields["status"] = *order.Fields.Status
+		}
+
+		if order.Fields.Income != nil {
+			updateFields["income"] = *order.Fields.Income
+		}
+
+		if order.Fields.Expense != nil {
+			updateFields["expense"] = *order.Fields.Expense
+		}
+
+		if order.Fields.AmountNote != nil {
+			updateFields["amount_note"] = *order.Fields.AmountNote
+		}
+
+		if order.Fields.PassengerID != nil {
+			updateFields["passenger_id"] = *order.Fields.PassengerID
+		}
+
+		// 執行更新
+		filter := bson.M{"_id": objectID}
+		update := bson.M{"$set": updateFields}
+
+		updateResult, err := collection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			result.Error = "更新訂單失敗: " + err.Error()
+			results[i] = result
+			s.logger.Error().Str("order_id", order.OrderID).Err(err).Msg("更新訂單失敗")
+			continue
+		}
+
+		if updateResult.MatchedCount == 0 {
+			result.Error = "訂單不存在"
+			results[i] = result
+			s.logger.Warn().Str("order_id", order.OrderID).Msg("訂單不存在")
+			continue
+		}
+
+		// 成功
+		result.Success = true
+		results[i] = result
+		s.logger.Info().Str("order_id", order.OrderID).Msg("訂單更新成功")
+	}
+
+	return results
 }

@@ -60,8 +60,9 @@ type Order struct {
 	Type                 OrderType           `json:"type" bson:"type" example:"即時" doc:"訂單類型"`
 	Status               OrderStatus         `json:"status,omitempty" bson:"status,omitempty" example:"等待接單" doc:"訂單狀態"`
 	ScheduledAt          *time.Time          `json:"scheduled_at,omitempty" bson:"scheduled_at,omitempty" doc:"預約時間"`
-	Amount               *int                `json:"amount,omitempty" bson:"amount,omitempty" example:"10" doc:"金額"`
 	AmountNote           string              `json:"amount_note,omitempty" bson:"amount_note,omitempty" doc:"金額備註"`
+	Income               *int                `json:"income,omitempty" bson:"income,omitempty" example:"100" doc:"收入"`
+	Expense              *int                `json:"expense,omitempty" bson:"expense,omitempty" example:"50" doc:"支出"`
 	PassengerID          string              `json:"passenger_id,omitempty" bson:"passenger_id,omitempty" doc:"乘客ID"`
 	Customer             Customer            `json:"customer" bson:"customer"`
 	CustomerGroup        string              `json:"customer_group" bson:"customer_group"`

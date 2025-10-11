@@ -43,7 +43,8 @@ func (c *OrderSummaryController) RegisterRoutes(api huma.API) {
 		var filter *service.OrderSummaryFilter
 		if input.StartDate != "" || input.EndDate != "" || input.Fleet != "" ||
 			input.CustomerGroup != "" || input.Status != "" || input.PickupAddress != "" ||
-			input.OrderID != "" || input.Driver != "" || input.PassengerID != "" {
+			input.OrderID != "" || input.Driver != "" || input.PassengerID != "" ||
+			input.ShortID != "" || input.Remarks != "" || input.AmountNote != "" || input.Keyword != "" {
 
 			// 處理多個狀態值 (以逗號分隔)
 			var statusList []string
@@ -65,6 +66,10 @@ func (c *OrderSummaryController) RegisterRoutes(api huma.API) {
 				OrderID:       input.OrderID,
 				Driver:        input.Driver,
 				PassengerID:   input.PassengerID,
+				ShortID:       input.ShortID,
+				Remarks:       input.Remarks,
+				AmountNote:    input.AmountNote,
+				Keyword:       input.Keyword,
 			}
 		} else {
 			// 如果沒有其他過濾條件，至少要有車隊過濾
@@ -179,5 +184,52 @@ func (c *OrderSummaryController) RegisterRoutes(api huma.API) {
 		}
 
 		return &struct{}{}, nil
+	})
+
+	// 批量編輯訂單
+	huma.Register(api, huma.Operation{
+		OperationID: "batch-edit-order-summary",
+		Method:      "PUT",
+		Path:        "/order-summary/batch-edit",
+		Summary:     "批量編輯訂單",
+		Tags:        []string{"order-summary"},
+	}, func(ctx context.Context, input *order.BatchEditOrderInput) (*order.BatchEditOrderResponse, error) {
+		// 驗證訂單數量
+		if len(input.Body.Orders) == 0 {
+			c.logger.Error().Msg("訂單列表不能為空")
+			return nil, huma.Error400BadRequest("訂單列表不能為空")
+		}
+
+		if len(input.Body.Orders) > 100 {
+			c.logger.Error().Msg("一次最多只能編輯100筆訂單")
+			return nil, huma.Error400BadRequest("一次最多只能編輯100筆訂單")
+		}
+
+		// 執行批量編輯
+		results := c.orderSummaryService.BatchEditOrders(ctx, input.Body.Orders)
+
+		// 統計成功和失敗數量
+		successCount := 0
+		failCount := 0
+		for _, result := range results {
+			if result.Success {
+				successCount++
+			} else {
+				failCount++
+			}
+		}
+
+		response := &order.BatchEditOrderResponse{}
+		response.Body.Results = results
+		response.Body.SuccessCount = successCount
+		response.Body.FailCount = failCount
+
+		c.logger.Info().
+			Int("success_count", successCount).
+			Int("fail_count", failCount).
+			Int("total", len(input.Body.Orders)).
+			Msg("批量編輯訂單完成")
+
+		return response, nil
 	})
 }

@@ -415,9 +415,6 @@ func (s *LineService) formatCompletedMessage(order *model.Order) string {
 	msg.WriteString(fmt.Sprintf("上車地點: %s\n", order.OriText))
 	msg.WriteString(fmt.Sprintf("備註: %s\n", order.Customer.Remarks))
 	msg.WriteString(fmt.Sprintf("駕駛: %s (%s)", order.Driver.Name, order.Driver.CarNo))
-	if order.Amount != nil {
-		msg.WriteString(fmt.Sprintf("\n車資: $%d", *order.Amount))
-	}
 
 	return msg.String()
 }
